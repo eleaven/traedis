@@ -28,6 +28,13 @@ type headerHook interface {
 // preserves http.Flusher, http.Hijacker and trailers (Header is the underlying map).
 // A withheld response is dropped instead: nothing of it is sent, but what the
 // backend put in the header stays there.
+//
+// It never holds back a response that streams. Yaegi v0.16.1 hides
+// http.Flusher from compiled code, which cannot ask for a flush any more: the
+// recorder flushes by itself the header and every write of a response of
+// unknown length. One with a Content-Length is left to the buffers of the
+// server: flushing it would only make a compress middleware placed before the
+// cache compress the responses it finds too small.
 type recorder struct {
 	rw          http.ResponseWriter
 	hook        headerHook
@@ -36,6 +43,7 @@ type recorder struct {
 	wroteHeader bool
 	capture     bool
 	withheld    bool
+	streams     bool // unknown length: flushed as it is written
 	hijacked    bool
 	buf         bytes.Buffer
 }
@@ -70,7 +78,11 @@ func (r *recorder) WriteHeader(code int) {
 			r.capture = false
 		}
 	}
+	r.streams = r.rw.Header().Get("Content-Length") == ""
 	r.rw.WriteHeader(code)
+	if r.streams {
+		flush(r.rw)
+	}
 }
 
 func (r *recorder) Write(p []byte) (int, error) {
@@ -81,6 +93,9 @@ func (r *recorder) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	n, err := r.rw.Write(p)
+	if r.streams {
+		flush(r.rw)
+	}
 	if r.capture {
 		if err != nil || int64(r.buf.Len()+n) > r.max {
 			r.stopCapture()
@@ -96,9 +111,7 @@ func (r *recorder) stopCapture() {
 	r.buf = bytes.Buffer{}
 }
 
-// Flush implements http.Flusher. Yaegi v0.16.1 hides it from compiled code
-// (only ResponseWriter+Hijacker is wrapped): the middleware does not wrap the
-// writer for responses expected to stream.
+// Flush implements http.Flusher, for callers that can see it.
 func (r *recorder) Flush() {
 	if !r.wroteHeader {
 		r.WriteHeader(http.StatusOK)

@@ -43,11 +43,12 @@ func (c *cache) invalidate(w http.ResponseWriter, r *http.Request) {
 // what was stored before. A Redis failure leaves the stored responses as they
 // are (fail open): they are served until they expire.
 //
-// It never holds the response back. Yaegi v0.16.1 hides http.Flusher from
-// compiled code, which cannot ask for a flush any more: the invalidator
-// flushes by itself, the header of a response of unknown length and every
-// write, so that a response that streams still does. It preserves
-// http.Hijacker and trailers (Header is the underlying map).
+// It never holds back a response that streams. Yaegi v0.16.1 hides
+// http.Flusher from compiled code, which cannot ask for a flush any more: the
+// invalidator flushes by itself the header and every write of a response of
+// unknown length, and leaves one with a Content-Length to the buffers of the
+// server (see recorder). It preserves http.Hijacker and trailers (Header is
+// the underlying map).
 type invalidator struct {
 	rw          http.ResponseWriter
 	store       store
@@ -55,6 +56,7 @@ type invalidator struct {
 	key         string
 	status      cacheStatus
 	wroteHeader bool
+	streams     bool // unknown length: flushed as it is written
 	hijacked    bool
 }
 
@@ -81,8 +83,9 @@ func (i *invalidator) WriteHeader(code int) {
 	}
 	h := i.rw.Header()
 	h.Add("Cache-Status", i.status.String())
+	i.streams = h.Get("Content-Length") == ""
 	i.rw.WriteHeader(code)
-	if h.Get("Content-Length") == "" {
+	if i.streams {
 		flush(i.rw)
 	}
 }
@@ -92,7 +95,9 @@ func (i *invalidator) Write(p []byte) (int, error) {
 		i.WriteHeader(http.StatusOK)
 	}
 	n, err := i.rw.Write(p)
-	flush(i.rw)
+	if i.streams {
+		flush(i.rw)
+	}
 	return n, err
 }
 

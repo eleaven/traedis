@@ -189,6 +189,66 @@ func TestRecorderPreservesFlusher(t *testing.T) {
 	}
 }
 
+// Compiled code cannot flush an interpreted writer under Yaegi v0.16.1: the
+// recorder flushes by itself a response of unknown length, so that one that
+// streams still does, kept for the store or not. A response with a
+// Content-Length is never flushed: that would make a compress middleware
+// before the cache compress the small ones. The client writer is a compiled
+// one, as in Traefik.
+func TestRecorderFlushes(t *testing.T) {
+	tests := []struct {
+		name          string
+		contentLength string
+		capture       bool
+		want          bool
+	}{
+		{name: "unknown length: the header and every write", want: true},
+		{name: "known length: nothing", contentLength: "10"},
+		{name: "unknown length, copy kept: the header and every write", capture: true, want: true},
+		{name: "known length, copy kept: nothing", contentLength: "10", capture: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rw := httptest.NewRecorder()
+			rec := newRecorder(rw, &hookStub{capture: tt.capture}, 1024)
+			if tt.contentLength != "" {
+				rec.Header().Set("Content-Length", tt.contentLength)
+			}
+			rec.WriteHeader(http.StatusOK)
+			if rw.Flushed != tt.want {
+				t.Errorf("flushed with the header = %v, want %v", rw.Flushed, tt.want)
+			}
+			for i := 0; i < 2; i++ {
+				rw.Flushed = false
+				if n, err := rec.Write([]byte("hello")); n != 5 || err != nil {
+					t.Fatalf("Write() = %d, %v", n, err)
+				}
+				if rw.Flushed != tt.want {
+					t.Errorf("write %d flushed = %v, want %v", i, rw.Flushed, tt.want)
+				}
+			}
+			if rw.Body.String() != "hellohello" {
+				t.Errorf("client got %q", rw.Body.String())
+			}
+			if body, ok := rec.body(); ok != tt.capture || string(body) != rec.buf.String() {
+				t.Errorf("body() = %q, %v", body, ok)
+			}
+		})
+	}
+}
+
+// Nothing of a withheld response is sent: it is not flushed either.
+func TestRecorderDoesNotFlushWithheldResponse(t *testing.T) {
+	rw := httptest.NewRecorder()
+	rec := newRecorder(rw, &hookStub{withhold: true}, 1024)
+	rec.WriteHeader(http.StatusServiceUnavailable)
+	_, _ = rec.Write([]byte("unavailable"))
+	rec.Flush()
+	if rw.Flushed || rw.Body.Len() != 0 {
+		t.Errorf("flushed = %v, body = %q", rw.Flushed, rw.Body.String())
+	}
+}
+
 func TestRecorderPreservesHijacker(t *testing.T) {
 	recCh := make(chan *recorder, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

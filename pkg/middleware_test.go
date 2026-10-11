@@ -1,6 +1,7 @@
 package traedis
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"io"
@@ -684,6 +685,84 @@ func TestPassThroughDoesNotWrapWriter(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A response to a GET reaches the client as it is written, not when the
+// handler returns, whether the cache keeps a copy of it or not: under Yaegi
+// v0.16.1 the backend cannot flush the writer the cache wraps.
+func TestResponseStreams(t *testing.T) {
+	tests := []struct {
+		name         string
+		cacheControl string
+		wantSets     int
+	}{
+		{name: "not stored", cacheControl: "no-store"},
+		{name: "stored", cacheControl: "max-age=60", wantSets: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			release := make(chan struct{})
+			// The handler never flushes, as compiled code that cannot see Flush.
+			c, st := newTestCache(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Type", "application/x-ndjson")
+				w.Header().Set("Cache-Control", tt.cacheControl)
+				_, _ = io.WriteString(w, "first\n")
+				<-release
+				_, _ = io.WriteString(w, "second\n")
+			}), nil)
+			srv := httptest.NewServer(onlyWriter{c})
+			defer srv.Close()
+
+			// The response is waited for aside: without a flush, its header does
+			// not come before the handler returns.
+			begun := make(chan streamed, 1)
+			go func() {
+				resp, err := http.Get(srv.URL)
+				if err != nil {
+					begun <- streamed{err: err}
+					return
+				}
+				body := bufio.NewReader(resp.Body)
+				line, _ := body.ReadString('\n')
+				begun <- streamed{resp: resp, body: body, line: line}
+			}()
+			var s streamed
+			select {
+			case got := <-begun:
+				s = got
+			case <-time.After(5 * time.Second):
+				close(release)
+				t.Fatal("the first write was not sent before the handler finished")
+			}
+			if s.err != nil {
+				close(release)
+				t.Fatal(s.err)
+			}
+			//goland:noinspection GoUnhandledErrorResult
+			defer s.resp.Body.Close()
+			if s.line != "first\n" {
+				t.Errorf("first line = %q", s.line)
+			}
+
+			// The stream is not altered, and still stored when it may be.
+			close(release)
+			rest, err := io.ReadAll(s.body)
+			if err != nil || string(rest) != "second\n" {
+				t.Errorf("rest of the body = %q, %v", rest, err)
+			}
+			if st.sets != tt.wantSets {
+				t.Errorf("sets = %d, want %d", st.sets, tt.wantSets)
+			}
+		})
+	}
+}
+
+// streamed is the beginning of a response that is still being written.
+type streamed struct {
+	resp *http.Response
+	body *bufio.Reader
+	line string
+	err  error
 }
 
 type ctxKey struct{}
