@@ -16,7 +16,7 @@ BENCH="${BENCH:-.}"
 BENCHTIME="${BENCHTIME:-2s}"
 export TRAEDIS_REDIS_DSN="${TRAEDIS_REDIS_DSN:-redis://localhost:6379/15}"
 
-MODULE="github.com/branchard/traedis"
+MODULE="github.com/eleaven/traedis"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 RESULTS="$ROOT/benchmark/results.json"
 TMP="$(mktemp -d)"

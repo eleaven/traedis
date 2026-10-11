@@ -22,4 +22,4 @@ providers:
 experimental:
   localPlugins:
     traedis:
-      moduleName: github.com/branchard/traedis
+      moduleName: github.com/eleaven/traedis

@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	traedis "github.com/branchard/traedis/pkg"
+	traedis "github.com/eleaven/traedis/pkg"
 )
 
 const (

@@ -14,7 +14,7 @@ services:
     volumes:
       - ./example/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./example/dynamic:/etc/traefik/dynamic:ro
-      - .:/plugins-local/src/github.com/branchard/traedis:ro
+      - .:/plugins-local/src/github.com/eleaven/traedis:ro
     develop:
       watch:
         - path: ./example/traefik.yml

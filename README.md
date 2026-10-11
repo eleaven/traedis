@@ -8,7 +8,7 @@
 
 # Traedis
 
-[![CI](https://github.com/branchard/traedis/actions/workflows/ci.yml/badge.svg)][ci]
+[![CI](https://github.com/eleaven/traedis/actions/workflows/ci.yml/badge.svg)][ci]
 
 **Redis**-backed HTTP cache for **Traefik**, shipped as a **middleware plugin**.
 
@@ -32,7 +32,7 @@ Declare the plugin in the Traefik **static** configuration:
 experimental:
   plugins:
     traedis:
-      moduleName: github.com/branchard/traedis
+      moduleName: github.com/eleaven/traedis
       version: vX.Y.Z # replace with the release you want
 ```
 
@@ -306,7 +306,7 @@ The version is the content of `VERSION`: on `main`, the [CI][ci] checks that it 
 
 [MIT](LICENSE)
 
-[ci]: https://github.com/branchard/traedis/actions/workflows/ci.yml
+[ci]: https://github.com/eleaven/traedis/actions/workflows/ci.yml
 [rfc9111]: https://www.rfc-editor.org/rfc/rfc9111
 [rfc9111-4.1]: https://www.rfc-editor.org/rfc/rfc9111#section-4.1
 [rfc9111-4.3]: https://www.rfc-editor.org/rfc/rfc9111#section-4.3
