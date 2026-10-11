@@ -14,6 +14,7 @@
 
 - **Standards-based**: follows [RFC 9111][rfc9111] (`Cache-Control`, `Vary`, `ETag`, `304 Not Modified`…), [RFC 5861][rfc5861]
   (`stale-while-revalidate`, `stale-if-error`) and [RFC 9211][rfc9211] (`Cache-Status`).
+- **Dependency-free**: only uses the Go standard library, with no third-party module and no `unsafe`.
 - **Safe by default**: never caches what must not be shared (`Authorization`, `Set-Cookie`, `private`) unless the backend explicitly allows
   it. See [Security](#security) for the pitfalls.
 - **Fail open**: if Redis is slow or down, requests go straight to the backend, and Traefik still starts.
