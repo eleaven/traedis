@@ -1,22 +1,22 @@
 # Contributing
 
 Requires Docker (with Compose), Go ≥ 1.22 and the [Yaegi](https://github.com/traefik/yaegi) version embedded in Traefik v3.7:
-`go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1`.
+`go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1`
 
 ## Project structure
 
 ```text
-pkg/          # the plugin (package `traedis`): one concern per file, with its `_test.go` next to it
-example/      # Traefik configuration of the local stack: one dynamic file per sample backend
-e2e/          # end-to-end tests: Hurl files requesting Traefik
-benchmark/    # benchmarks under Yaegi, k6 load test, results viewer
-compose.yml   # local stack: Traefik, Redis, sample backends (whoami, placeholder, imgproxy), Redis Insight
-.traefik.yml  # plugin manifest of the Traefik Plugin Catalog
-VERSION       # the version to release
+pkg/               # the plugin (package `traedis`): one concern per file, with its `_test.go` next to it
+  middleware.go    #   the entry point: `New()` and the handler
+  policy.go        #   what may be stored and served
+  redis.go         #   the Redis client: RESP and connection pool
+example/           # Traefik configuration of the local stack: one dynamic file per sample backend
+e2e/               # end-to-end tests: Hurl files requesting Traefik
+benchmark/         # benchmarks under Yaegi, k6 load test, results viewer
+compose.yml        # local stack: Traefik, Redis, sample backends (whoami, placeholder, imgproxy), Redis Insight
+.traefik.yml       # plugin manifest of the Traefik Plugin Catalog
+VERSION            # the version to release
 ```
-
-In `pkg/`, `middleware.go` is the entry point (`New()` and the handler), `policy.go` decides what may be stored and served, and `redis.go`
-is the Redis client (RESP and connection pool).
 
 ## Commands
 
@@ -29,9 +29,6 @@ make e2e         # end-to-end tests, through Traefik
 make bench       # benchmarks → benchmark/results.json (`make bench-view` shows them)
 make help        # list all targets
 ```
-
-`make start` prints the URLs to try: Traefik listens on <http://localhost:8080>, each sample backend has a route without the cache and one
-with it, and Redis Insight shows what is stored.
 
 ## Rules
 
@@ -46,12 +43,17 @@ with it, and Redis Insight shows what is stored.
   stored ones other than by [invalidation](README.md#invalidation), and nothing is allocated from a length that was not checked.
 - **Stored formats are stable.** Changing the Redis key invalidates the whole cache; changing the encoding of an entry or of a `Vary` marker
   bumps its version prefix.
-- **Every bug fix comes with a regression test**, and what is visible through Traefik with an end-to-end one.
-- **Keep it simple.** No option, dependency or abstraction without a need for it.
+- **The README is the specification.** A change of behaviour updates its "How it works" or "Security" section. An option is declared in
+  `pkg/config.go`, in the README table and in the `testData` of `.traefik.yml`.
+- **Every bug fix comes with a regression test**, and what is visible through Traefik with an end-to-end one. The files of `e2e/tests/` run
+  in parallel: each one only requests URLs that its own `{{newUuid}}` makes unique.
 
-## Releases
+## Pull requests and releases
 
-The version is the content of `VERSION`: on `main`, the [CI][ci] checks that it is the next patch, minor or major of the last release.
+`make test` has to pass: the [CI][ci] runs it on every pull request. It also runs the benchmarks, for information only.
+
+The version is the content of `VERSION` (`vMAJOR.MINOR.PATCH`). To release, set it to the next patch, minor or major of the last release:
+on `main`, the CI checks it once the tests pass.
 
 [ci]: https://github.com/eleaven/traedis/actions/workflows/ci.yml
 [rfc9111]: https://www.rfc-editor.org/rfc/rfc9111
