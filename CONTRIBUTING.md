@@ -47,6 +47,8 @@ make help        # list all targets
   `pkg/config.go`, in the README table and in the `testData` of `.traefik.yml`.
 - **Every bug fix comes with a regression test**, and what is visible through Traefik with an end-to-end one. The files of `e2e/tests/` run
   in parallel: each one only requests URLs that its own `{{newUuid}}` makes unique.
+- **Keep the code simple.** Concise and easy to follow, with comments that give the reason rather than repeat the code: the RFC section
+  behind a rule, the Yaegi bug behind a workaround.
 
 ## Pull requests and releases
 
