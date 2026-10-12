@@ -301,9 +301,9 @@ Load test through Traefik with 10 concurrent clients, as requests per second and
 
 | Backend | Without cache | Cache miss | Cache hit | Gain |
 | --- | --: | --: | --: | --: |
-| [Text answered after 100 ms][whoami] | 99.0 req/s · 102 ms | 98.0 req/s · 102 ms | 3,603 req/s · 2.1 ms | **×36** |
-| [Rendered PNG][placeholder] | 81.6 req/s · 115 ms | 85.6 req/s · 111 ms | 3,328 req/s · 2.2 ms | **×41** |
-| [Image converted to AVIF][imaging] | 68.3 req/s · 133 ms | 67.5 req/s · 135 ms | 3,426 req/s · 2.2 ms | **×50** |
+| [Text answered after 100 ms][whoami] | 98.1 req/s · 102 ms | 98.0 req/s · 102 ms | 4,182 req/s · 1.73 ms | **×43** |
+| [Rendered PNG][placeholder] | 77.3 req/s · 124 ms | 81.8 req/s · 115 ms | 3,900 req/s · 1.84 ms | **×50** |
+| [Image converted to AVIF][imaging] | 64.1 req/s · 143 ms | 57.9 req/s · 161 ms | 4,009 req/s · 1.79 ms | **×62** |
 
 These figures come from the [CI run of October 12, 2026][bench-run], on a shared GitHub Actions runner: read them as orders of magnitude.
 Every [CI][ci] run publishes its own in its summary, with the p95 and the cost of the middleware alone. `make bench` runs them locally.
@@ -323,7 +323,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the local stack, the tests and the ru
 [rfc9111-4.4]: https://www.rfc-editor.org/rfc/rfc9111#section-4.4
 [rfc5861]: https://www.rfc-editor.org/rfc/rfc5861
 [rfc9211]: https://www.rfc-editor.org/rfc/rfc9211
-[bench-run]: https://github.com/eleaven/traedis/actions/runs/38282212745/attempts/1#summary-114921946392
+[bench-run]: https://github.com/eleaven/traedis/actions/runs/38289730377/attempts/1#summary-114946639664
 [whoami]: example/dynamic/whoami.yml
 [placeholder]: example/dynamic/placeholder.yml
 [imaging]: example/dynamic/imaging.yml
