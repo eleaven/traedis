@@ -22,9 +22,11 @@ hurl() {
     --test --max-time 10 --report-junit /report/junit.xml "$@" || failures=$((failures + 1))
 }
 
-# The stack has just started: a first connection to Redis slower than
-# `redis.timeout` would bypass the cache.
-sleep 2
+# The stack has just started: its first requests may be too slow for
+# `redis.timeout`, which bypasses the cache. Waiting does not help, they have
+# to be made: warmup.hurl asks until the cache answers.
+echo "# Warm-up"
+hurl /e2e/warmup.hurl
 
 echo "# Redis up"
 hurl /e2e/tests
