@@ -18,7 +18,7 @@
 - **Safe by default**: never caches what must not be shared (`Authorization`, `Set-Cookie`, `private`) unless the backend explicitly allows
   it. See [Security](#security) for the pitfalls.
 - **Fail open**: if Redis is slow or down, requests go straight to the backend, and Traefik still starts.
-- **Observable**: every response tells what the cache did in a [`Cache-Status`](#cache-status) header.
+- **Observable**: every response tells what the cache did in a [`Cache-Status`](#added-by-traedis) header.
 - **Stream-friendly**: large bodies, WebSockets and server-sent events pass through untouched.
 - **Persistent and shared**: responses are stored in Redis, not in Traefik's memory: the cache survives restarts and redeploys, and all
   Traefik replicas share it.
@@ -73,52 +73,100 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `defaultStaleWhileRevalidate` | `0s`                   | `stale-while-revalidate` window for responses that don't send the directive. `0` disables it.                                                  |
 | `defaultStaleIfError`         | `0s`                   | `stale-if-error` window for responses that don't send the directive. `0` disables it.                                                          |
 | `maxBodyBytes`                | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached.                                                                                    |
-| `maxVariants`                 | `16`                   | Stored [variants](#variants-vary) per URL. `0`: responses with `Vary` are not cached.                                                          |
+| `maxVariants`                 | `16`                   | Stored [variants](#variants) per URL. `0`: responses with `Vary` are not cached.                                                          |
 | `sortQuery`                   | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
 | `exposeKey`                   | `false`                | Add the Redis key to the `Cache-Status` header (`key="…"`).                                                                                    |
 
-## How it works
+## HTTP headers
 
-### What gets cached
+Traedis is driven by the standard HTTP header fields. This is what each of them does; [Caching rules](#caching-rules) has the
+fine print.
+
+### Sent by the backend
+
+The response of the backend says whether it may be stored, for how long, and whether it may be served stale.
+
+- `Cache-Control`, a list of directives separated by commas (`max-age=60, stale-if-error=300`):
+  - `max-age=N`: fresh for `N` seconds.
+  - `s-maxage=N`: the same, and it wins over `max-age`. Never served [stale](#stale-responses).
+  - `no-store`, `private`, `no-cache`: do not store the response.
+  - `private="Set-Cookie"`, `no-cache="Set-Cookie"`: stored without the header fields they name, which only the client that caused the
+    miss gets.
+  - `public`: stored even when the request has `Authorization`.
+  - `must-revalidate`, `proxy-revalidate`: never served stale.
+  - `stale-while-revalidate=N`: once stale, still served for `N` seconds, and refreshed in the background.
+  - `stale-if-error=N`: once stale, still served for `N` seconds in place of an error of the backend.
+- `Expires`: until when it is fresh, without `max-age` nor `s-maxage`. Without any of the three, `defaultTtl` applies, unless the exchange
+  has `Authorization`, `Cookie` or `Set-Cookie`.
+- `Age`, `Date`: how old the response already is. It is stored for the freshness it has left.
+- `Vary`: one stored [variant](#variants) per value of the request header fields it names. Not stored with `*`, `Cookie` or
+  `Authorization` (one variant per user).
+- `ETag`, `Last-Modified`: let the cache [validate](#conditional-requests) a stale response instead of getting it
+  again, and answer `304` to the clients that already have it.
+- `Set-Cookie`: not stored, even `public`, unless `private="Set-Cookie"` or `no-cache="Set-Cookie"` keeps the cookie out.
+
+### Sent by the client
+
+The request of the client says whether a stored response may answer it.
+
+- `Cache-Control`:
+  - `no-cache`: always forwarded, whatever is stored. The response is stored.
+  - `no-store`: the response is not stored. A stored one can still answer.
+  - `max-age=N`: refuses a stored response older than `N` seconds.
+  - `min-fresh=N`: refuses a stored response that is not fresh for `N` more seconds.
+  - `max-stale=N`: accepts a response that is stale by less than `N` seconds; `max-stale` alone, by any time.
+  - `only-if-cached`: never forwarded. When nothing stored can answer, it gets a `504` without `Cache-Status`. With `max-stale`, it is what
+    an offline client sends.
+- `Pragma: no-cache`: like `Cache-Control: no-cache`, for a request without `Cache-Control`.
+- `If-None-Match`, `If-Modified-Since`: answered with a `304` when the stored response is the one the client
+  [already has](#conditional-requests).
+- `Authorization`: the response is only stored with `public`, `s-maxage` or `must-revalidate`.
+- `Cookie`: not part of the cache key, see [Security](#security).
+- `Accept-Encoding`, and the header fields that `Vary` names: choose the [variant](#variants).
+- `Upgrade`, `Accept: text/event-stream`: forwarded untouched (WebSockets, server-sent events).
+
+### Added by Traedis
+
+Traedis adds these to the responses it sends to the client, and to the requests it sends to the backend.
+
+- `Age`: on a response served from the cache, the seconds since the backend made it.
+- `If-None-Match`, `If-Modified-Since`: sent to the backend in place of those of the client, to
+  [validate](#conditional-requests) a stored response.
+- `Cache-Status: traedis; …`: on every response, what the cache did ([RFC 9211][rfc9211]):
+  - `hit; ttl=N`: served from the cache, fresh for `N` more seconds.
+  - `hit; ttl=-N; detail=stale-while-revalidate`: served from the cache, stale by `N` seconds, and refreshed in the background.
+  - `hit; ttl=-N; detail=max-stale`: served from the cache, stale by `N` seconds, as the request allows.
+  - `fwd=uri-miss`: forwarded, nothing is stored for this URL.
+  - `fwd=vary-miss`: forwarded, this URL has [variants](#variants), but none for this request.
+  - `fwd=stale`: forwarded, the stored response is stale.
+  - `fwd=request`: forwarded, the request says `no-cache`, or its `max-age` or `min-fresh` refuses a stored response that is still fresh.
+  - `fwd=stale; fwd-status=304; ttl=N`: [validated](#conditional-requests) by the backend, the stored response is
+    served, fresh for `N` seconds again.
+  - `fwd=stale; fwd-status=503; ttl=-N; detail=stale-if-error`: the backend failed, the stored response is served in place of its error.
+  - `fwd=bypass`: forwarded untouched, WebSocket upgrade or server-sent events.
+  - `fwd=bypass; detail=redis`: forwarded, Redis failed or timed out.
+  - `fwd=method`: forwarded, `OPTIONS`, `TRACE` or an unsafe method.
+  - `fwd=method; detail=invalidated`: unsafe method, the stored responses of the URL were [removed](#invalidation-by-unsafe-methods)
+    (`detail=redis`: Redis could not be reached).
+  - `fwd-status=N`: the status the backend answered with, whatever the client gets.
+  - `key="…"`: the Redis key, with `exposeKey`.
+
+## Caching rules
+
+### Cacheable responses
 
 Responses are stored by URL (scheme, host, path and query), and only when all of the following hold:
 
 - the request is a `GET` (a `HEAD` is answered from the stored `GET`);
 - its status is listed in `statusCodes`;
 - it is fresh, through `s-maxage`, `max-age`, `Expires` or `defaultTtl`;
-- neither side says `no-store`, and the response is not `private` or `no-cache`;
-- a request with `Authorization` got a response with `public`, `s-maxage` or `must-revalidate`;
-- a response with `Set-Cookie` says `private="Set-Cookie"` or `no-cache="Set-Cookie"`: it is stored without the cookie, which only the
-  client that caused the miss gets. Without one of them, it is not stored, even `public`;
-- its `Vary`, if any, is not `*` and names neither `Cookie` nor `Authorization` (one variant per user);
+- no [header field](#http-headers) of the request or of the response forbids it;
 - it is complete (a response that the backend cuts short is not stored) and fits in `maxBodyBytes`.
 
 `OPTIONS`, `TRACE`, WebSocket upgrades and `Accept: text/event-stream` requests are forwarded as is. So are unsafe methods (`POST`, `PUT`,
-`DELETE`…), which [invalidate](#invalidation) what is stored.
+`DELETE`…), which [invalidate](#invalidation-by-unsafe-methods) what is stored.
 
-### `Cache-Status`
-
-Every response tells what the cache did, in a `Cache-Status: traedis; …` header ([RFC 9211][rfc9211]):
-
-| `Cache-Status: traedis; …`                                 | Meaning                                                                                                                           |
-|------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| `hit; ttl=N`                                               | Served from the cache, fresh for `N` more seconds.                                                                                |
-| `hit; ttl=-N; detail=stale-while-revalidate`               | Served from the cache, stale by `N` seconds, and refreshed in the background.                                                     |
-| `hit; ttl=-N; detail=max-stale`                            | Served from the cache, stale by `N` seconds, as the request allows.                                                               |
-| `fwd=uri-miss`                                             | Forwarded: nothing is stored for this URL.                                                                                        |
-| `fwd=vary-miss`                                            | Forwarded: this URL has [variants](#variants-vary), but none for this request.                                                    |
-| `fwd=stale`                                                | Forwarded: the stored response is stale.                                                                                          |
-| `fwd=request`                                              | Forwarded: the request says `no-cache`, or its `max-age` or `min-fresh` refuses a stored response that is still fresh.            |
-| `fwd=stale; fwd-status=304; ttl=N`                         | [Validated](#conditional-requests-etag-last-modified) by the backend: the stored response is served, fresh for `N` seconds again. |
-| `fwd=stale; fwd-status=503; ttl=-N; detail=stale-if-error` | The backend failed: the stored response is served in place of its error.                                                          |
-| `fwd=bypass`                                               | Forwarded untouched: WebSocket upgrade or server-sent events.                                                                     |
-| `fwd=bypass; detail=redis`                                 | Forwarded: Redis failed or timed out.                                                                                             |
-| `fwd=method`                                               | Forwarded: `OPTIONS`, `TRACE` or an unsafe method.                                                                                |
-| `fwd=method; detail=invalidated`                           | Unsafe method: the stored responses of the URL were [removed](#invalidation) (`detail=redis`: Redis could not be reached).        |
-
-`fwd-status=N` is the status the backend answered with, whatever the client gets.
-
-### Variants (`Vary`)
+### Variants
 
 With `Vary`, the cache stores one variant per value of the request headers it names
 ([RFC 9111 §4.1][rfc9111-4.1]): with `Vary: Accept-Language`, `fr` and `en` requests each get their own stored response.
@@ -147,7 +195,7 @@ that accepts that coding.
 > response has no `Vary` and is served to everyone. Put `compress` before the cache, or set `Vary: Accept-Encoding` on every response with a
 > `headers` middleware, as [`example/dynamic/whoami.yml`](example/dynamic/whoami.yml) does.
 
-### Conditional requests (`ETag`, `Last-Modified`)
+### Conditional requests
 
 The cache plays both parts of `If-None-Match`, `If-Modified-Since` and `304 Not Modified` ([RFC 9111 §4.3][rfc9111-4.3]).
 
@@ -176,27 +224,23 @@ it like a `304`; a different one drops a stored response that was still fresh.
 
 A stored response that is no longer fresh is served only when allowed, for at most `staleTtl`:
 
-- **`stale-while-revalidate=N`** on the response ([RFC 5861](https://www.rfc-editor.org/rfc/rfc5861)): for `N` seconds, it is served at once
-  and refreshed in the background, with at most one refresh per URL and 10 at a time in each Traefik instance.
-- **`stale-if-error=N`** on the response: for `N` seconds, it replaces a `500`, `502`, `503` or `504`, including those of Traefik when the
-  backend is unreachable.
-- **`max-stale`** on the request ([RFC 9111 §5.2.1.2](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1.2)): `max-stale=N` accepts a
-  response that is stale by less than `N` seconds, `max-stale` alone by any time. It is served as it is, without asking the backend nor
-  refreshing it.
+- **`stale-while-revalidate`** ([RFC 5861][rfc5861]): it is served at once and refreshed in the background, with at most one refresh per
+  URL and 10 at a time in each Traefik instance. Not for a request with `max-age` or `min-fresh` (a browser reload), which waits for the
+  backend.
+- **`stale-if-error`**: it replaces a `500`, `502`, `503` or `504`, including those of Traefik when the backend is unreachable. A request
+  with `max-age` or `min-fresh` gets it too, one with `no-cache` does not.
+- **`max-stale`** on the request ([RFC 9111 §5.2.1.2](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1.2)): it is served as it is,
+  without asking the backend nor refreshing it.
 
 As [RFC 9111][rfc9111] requires, `must-revalidate`, `proxy-revalidate`, `s-maxage` and `no-cache` forbid all three:
 `max-age=60, stale-while-revalidate=300` is served stale, `s-maxage=60, stale-while-revalidate=300` is not.
-
-The request has its say too. With `max-age` or `min-fresh` (a browser reload), it always goes to the backend, and only gets a stale response
-through `stale-if-error`. With `no-cache`, it never gets a stored response. With `only-if-cached`, it is never forwarded: when nothing
-stored can answer it, it gets a `504` without `Cache-Status` (with `max-stale`, it is what an offline client sends).
 
 For backends that don't send these directives, `defaultStaleWhileRevalidate` and `defaultStaleIfError` set the windows instead:
 `defaultStaleIfError: 10m` serves what is stored rather than a `5xx`. A directive of the response always wins (`stale-if-error=0` still
 turns it off), and the rules above still apply. With `defaultStaleWhileRevalidate`, clients can get a response older than what the backend
 asked for: on a URL that is rarely requested, by up to the whole window.
 
-### Invalidation
+### Invalidation by unsafe methods
 
 When the backend answers a request with an unsafe method (any method that is not `GET`, `HEAD`, `OPTIONS` or `TRACE`) with a `2xx` or a
 `3xx`, the stored responses of its URL are removed, with all their variants
@@ -213,7 +257,7 @@ When the backend answers a request with an unsafe method (any method that is not
 ## Security
 
 A shared cache gives the response made for one client to all the others. The defaults are careful (see
-[What gets cached](#what-gets-cached)), but the cache only knows what the backend and the configuration tell it:
+[HTTP headers](#http-headers)), but the cache only knows what the backend and the configuration tell it:
 
 - **A cookie does not make a response private.** Cookies are not part of the cache key: a response with `max-age`, `s-maxage` or `Expires`
   is stored and shared even when its request had a `Cookie` (only `defaultTtl` is never applied to an exchange with `Authorization`,
