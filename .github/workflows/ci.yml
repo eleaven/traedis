@@ -144,8 +144,7 @@ jobs:
   # Creates the tag and the GitHub release
   release:
     needs: [ validate-version, detect-new-version ]
-    # Disabled for now. To start releasing, replace with: needs.detect-new-version.outputs.new == 'true'
-    if: false
+    if: needs.detect-new-version.outputs.new == 'true'
     runs-on: ubuntu-latest
     # One release at a time: two pushes must not race for the same tag
     concurrency:

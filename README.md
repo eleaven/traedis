@@ -1,5 +1,5 @@
 > [!WARNING]
-> **This project is a work in progress.** Use it at your own risk.
+> **This project is in its early stages.** Use it at your own risk.
 
 <!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
