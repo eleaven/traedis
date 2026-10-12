@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strconv"
 	"strings"
 	"testing"
@@ -123,7 +124,7 @@ func TestMissThenHit(t *testing.T) {
 
 func storeEntry(t *testing.T, st *memStore, uri string, e *entry) {
 	t.Helper()
-	if err := st.set(context.Background(), redisKey(uri), "", encodeEntry(e), time.Hour); err != nil {
+	if err := st.put(redisKey(uri), "", e, nil, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -510,7 +511,7 @@ func TestStaleIfErrorAfterStaleWhileRevalidate(t *testing.T) {
 func TestCorruptEntryIsAMiss(t *testing.T) {
 	b := cacheableBackend()
 	c, st := newTestCache(t, b, nil)
-	if err := st.set(context.Background(), redisKey("http://example.com/a"), "", []byte("TRD1garbage"), time.Hour); err != nil {
+	if err := st.putRaw(redisKey("http://example.com/a"), "", []byte(entryVersion+"garbage")); err != nil {
 		t.Fatal(err)
 	}
 	rec := doRequest(c, http.MethodGet, "http://example.com/a", nil)
@@ -786,5 +787,177 @@ func TestTraceContextIsPropagated(t *testing.T) {
 	}
 	if got.Header.Get("Traceparent") != req.Header.Get("Traceparent") || got.Header.Get("Tracestate") != "vendor=1" {
 		t.Error("traceparent/tracestate must reach the backend")
+	}
+}
+
+// The body of a stored response is only read from the store when it is sent:
+// along with the entry when the answer is sure to have it, after it when a
+// condition of the client turns out not to hold.
+func TestBodyIsOnlyReadWhenSent(t *testing.T) {
+	entryOnly := []string{""}
+	withBody := []string{"", bodyField("")}
+	tests := []struct {
+		name      string
+		method    string
+		reqHdr    http.Header
+		wantCode  int
+		wantBody  string
+		wantReads [][]string
+	}{
+		{name: "GET: one round trip", wantCode: 200, wantBody: "hello", wantReads: [][]string{withBody}},
+		{name: "HEAD", method: http.MethodHead, wantCode: 200, wantReads: [][]string{entryOnly}},
+		{name: "§4.3.2 condition that holds: 304", reqHdr: http.Header{"If-None-Match": {`"v1"`}}, wantCode: 304, wantReads: [][]string{entryOnly}},
+		{name: "§4.3.2 If-Modified-Since that holds: 304", reqHdr: http.Header{"If-Modified-Since": {lastModified}}, wantCode: 304, wantReads: [][]string{entryOnly}},
+		{name: "§4.3.2 condition that does not hold: the body is read then", reqHdr: http.Header{"If-None-Match": {`"v0"`}}, wantCode: 200, wantBody: "hello", wantReads: [][]string{entryOnly, withBody}},
+		{name: "HEAD with a condition that does not hold", method: http.MethodHead, reqHdr: http.Header{"If-None-Match": {`"v0"`}}, wantCode: 200, wantReads: [][]string{entryOnly}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := newOrigin()
+			c, st := newTestCache(t, o, nil)
+			doRequest(c, http.MethodGet, testURL, nil)
+			st.reads = nil
+			method := tt.method
+			if method == "" {
+				method = http.MethodGet
+			}
+			rec := doRequest(c, method, testURL, tt.reqHdr)
+
+			if o.calls != 1 || !isHit(lastCacheStatus(rec)) {
+				t.Fatalf("expected a hit: %q (backend calls %d)", lastCacheStatus(rec), o.calls)
+			}
+			if rec.Code != tt.wantCode || rec.Body.String() != tt.wantBody {
+				t.Errorf("got %d %q, want %d %q", rec.Code, rec.Body.String(), tt.wantCode, tt.wantBody)
+			}
+			if tt.wantCode == 200 && rec.Header().Get("Content-Length") != "5" {
+				t.Errorf("Content-Length = %q: it is known without the body", rec.Header().Get("Content-Length"))
+			}
+			if !reflect.DeepEqual(st.reads, tt.wantReads) {
+				t.Errorf("fields read = %q, want %q", st.reads, tt.wantReads)
+			}
+		})
+	}
+}
+
+// changingStore changes what is stored right after its next read: what another
+// request does between the read of an entry and the read of its body.
+type changingStore struct {
+	*memStore
+	change func(st *memStore)
+}
+
+func (s *changingStore) get(ctx context.Context, key string, fields []string) ([][]byte, error) {
+	values, err := s.memStore.get(ctx, key, fields)
+	if change := s.change; change != nil {
+		s.change = nil
+		change(s.memStore)
+	}
+	return values, err
+}
+
+// The body read after its entry must be the one of that entry.
+func TestBodyOfAnotherResponseIsNotServed(t *testing.T) {
+	key := redisKey(testURL)
+	tests := []struct {
+		name   string
+		change func(st *memStore)
+	}{
+		{name: "another response of the same length was stored", change: func(st *memStore) {
+			now := time.Now()
+			_ = st.put(key, "", &entry{
+				status: 200, header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"v2"`}}, body: []byte("HELLO"),
+				requestTime: now, responseTime: now,
+			}, nil, time.Hour)
+		}},
+		{name: "the body expired", change: func(st *memStore) {
+			_ = st.del(context.Background(), key, []string{bodyField("")})
+		}},
+		{name: "the response was invalidated", change: func(st *memStore) {
+			_ = st.invalidate(context.Background(), key)
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, err := parseConfig(CreateConfig())
+			if err != nil {
+				t.Fatal(err)
+			}
+			o := newOrigin()
+			st := &changingStore{memStore: newMemStore()}
+			c := newCache(o, "cache", s, st)
+			doRequest(c, http.MethodGet, testURL, nil)
+
+			o.etag = `"v3"`
+			o.body = "fresh"
+			st.change = tt.change
+			rec := doRequest(c, http.MethodGet, testURL, http.Header{"If-None-Match": {`"v0"`}})
+			if rec.Code != 200 || rec.Body.String() != "fresh" || rec.Header().Get("ETag") != `"v3"` || o.calls != 2 {
+				t.Fatalf("the backend must answer: got %d %q %v (backend calls %d)", rec.Code, rec.Body.String(), rec.Header(), o.calls)
+			}
+			if got := lastCacheStatus(rec); got != "traedis; fwd=uri-miss; fwd-status=200" {
+				t.Errorf("Cache-Status = %q", got)
+			}
+			if rec := doRequest(c, http.MethodGet, testURL, nil); !isHit(lastCacheStatus(rec)) || rec.Body.String() != "fresh" {
+				t.Errorf("its response must be stored: got %q %q", lastCacheStatus(rec), rec.Body.String())
+			}
+		})
+	}
+}
+
+// RFC 5861 §4: the stored response that replaces a backend error has its body
+// read then, when find left it in the store. Without it, the error goes
+// through.
+func TestStaleIfErrorReadsTheBody(t *testing.T) {
+	for _, gone := range []bool{false, true} {
+		b := &backend{status: 503, body: "error"}
+		c, st := newTestCache(t, b, nil)
+		storeAged(t, st, "max-age=60, stale-if-error=300", 2*time.Minute)
+		if gone {
+			if err := st.del(context.Background(), redisKey(staleURL), []string{bodyField("")}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		rec := doRequest(c, http.MethodGet, staleURL, http.Header{"If-None-Match": {`"v0"`}})
+		wantCode, wantBody, wantStatus := 200, "old", "; detail=stale-if-error"
+		if gone {
+			wantCode, wantBody, wantStatus = 503, "error", "traedis; fwd=stale; fwd-status=503"
+		}
+		if rec.Code != wantCode || rec.Body.String() != wantBody || !strings.HasSuffix(lastCacheStatus(rec), wantStatus) || b.calls != 1 {
+			t.Errorf("body gone = %v: got %d %q %q (backend calls %d)", gone, rec.Code, rec.Body.String(), lastCacheStatus(rec), b.calls)
+		}
+	}
+}
+
+// What the age and the freshness lifetime of a response are worked out from is
+// stored with it, rather than parsed from its header on every hit.
+func TestFreshnessIsStoredWithTheEntry(t *testing.T) {
+	b := &backend{header: http.Header{"Cache-Control": {"max-age=60"}, "Age": {"10"}}, body: "hello"}
+	c, st := newTestCache(t, b, nil)
+	doRequest(c, http.MethodGet, testURL, nil)
+	e := st.entry(redisKey(testURL), "")
+	if e == nil || e.lifetime != time.Minute || e.initialAge < 10*time.Second || e.initialAge >= 11*time.Second {
+		t.Fatalf("stored entry = %+v, want a lifetime of 1m and an initial age of 10s", e)
+	}
+	rec := doRequest(c, http.MethodGet, testURL, nil)
+	if got := lastCacheStatus(rec); got != "traedis; hit; ttl=50" && got != "traedis; hit; ttl=49" {
+		t.Errorf("Cache-Status = %q", got)
+	}
+	if rec.Header().Get("Age") != "10" {
+		t.Errorf("§4.2.3 Age = %q, want 10", rec.Header().Get("Age"))
+	}
+
+	// Without explicit freshness, defaultTtl applies as it is configured now.
+	b = &backend{header: http.Header{"Content-Type": {"text/plain"}}, body: "hello"}
+	c, st = newTestCache(t, b, nil)
+	doRequest(c, http.MethodGet, testURL, nil)
+	if e := st.entry(redisKey(testURL), ""); e == nil || e.lifetime != -1 {
+		t.Fatalf("stored entry = %+v, want no explicit lifetime", e)
+	}
+	if rec := doRequest(c, http.MethodGet, testURL, nil); !isHit(lastCacheStatus(rec)) {
+		t.Errorf("defaultTtl: got %q", lastCacheStatus(rec))
+	}
+	c.cfg.defaultTTL = 0
+	if rec := doRequest(c, http.MethodGet, testURL, nil); lastCacheStatus(rec) != "traedis; fwd=stale; fwd-status=200" {
+		t.Errorf("defaultTtl lowered to 0: got %q", lastCacheStatus(rec))
 	}
 }

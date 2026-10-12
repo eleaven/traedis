@@ -59,7 +59,9 @@ func (c *cache) refresh(req *http.Request, key, field string, e *entry) {
 	defer cancel()
 	req = req.WithContext(ctx)
 
-	m := &missHook{c: c, req: req, store: true, revalidation: true, requestTime: time.Now(), stored: e}
+	m := &missHook{c: c, req: req, reqCC: parseCacheControl(nil), key: key, field: field, requestTime: time.Now(), stored: e}
+	m.store = true
+	m.revalidation = true
 	out, validating := backendRequest(req, e)
 	m.validating = validating
 	rec := newRecorder(&nullWriter{header: http.Header{}}, m, c.cfg.maxBodyBytes)
@@ -70,12 +72,12 @@ func (c *cache) refresh(req *http.Request, key, field string, e *entry) {
 	if m.validated != nil {
 		// A 304 that does not update the entry leaves it as it is (§4.3.4).
 		if m.updated {
-			c.freshen(ctx, req, key, field, m.validated)
+			c.freshen(ctx, req, m.reqCC, key, field, m.validated)
 		}
 		return
 	}
 	if !c.save(ctx, rec, m, key) && m.superseded {
-		_ = c.store.del(ctx, key, field)
+		c.drop(ctx, key, field)
 	}
 }
 

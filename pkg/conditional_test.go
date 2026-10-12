@@ -173,7 +173,7 @@ func TestValidates(t *testing.T) {
 }
 
 func TestHeadMatches(t *testing.T) {
-	stored := &entry{header: http.Header{"Etag": {`"v1"`}, "Last-Modified": {lastModified}}, body: []byte("hello")}
+	stored := &entry{header: http.Header{"Etag": {`"v1"`}, "Last-Modified": {lastModified}}, size: 5}
 	tests := []struct {
 		name string
 		h    http.Header
@@ -498,13 +498,12 @@ func storeValidated(t *testing.T, st *memStore, cacheControl string, age time.Du
 
 func storedAt(t *testing.T, c *cache, st *memStore, uri, field string) *entry {
 	t.Helper()
-	v, ok := st.lookup(redisKey(uri), field)
-	if !ok {
+	if _, ok := st.lookup(redisKey(uri), field); !ok {
 		return nil
 	}
-	e, err := decodeEntry(v.value, c.maxEntry)
-	if err != nil {
-		t.Fatal(err)
+	e := st.entry(redisKey(uri), field)
+	if e == nil {
+		t.Fatal("the field must hold an entry")
 	}
 	return e
 }
@@ -559,6 +558,9 @@ func TestValidation(t *testing.T) {
 	}
 	if v, _ := st.lookup(redisKey(staleURL), ""); !closeTo(v.ttl, 2*time.Minute+time.Hour) {
 		t.Errorf("stored ttl = %v", v.ttl)
+	}
+	if v, _ := st.lookup(redisKey(staleURL), bodyField("")); !closeTo(v.ttl, 2*time.Minute+time.Hour) {
+		t.Errorf("ttl of the body = %v: it must be kept for as long as its entry", v.ttl)
 	}
 	if len(e.header.Values("Cache-Status")) != 1 {
 		t.Errorf("our Cache-Status must not be stored: %q", e.header.Values("Cache-Status"))
@@ -787,7 +789,7 @@ func TestValidationOfVariant(t *testing.T) {
 		}
 		fields[lang] = variantField(names, http.Header{"Accept-Language": {lang}}, identity)
 		mk := encodeMarker(marker{names: names, codings: []string{"zstd", identity}})
-		if err := st.setVariant(context.Background(), key, fields[lang], encodeEntry(e), mk, time.Hour, false); err != nil {
+		if err := st.put(key, fields[lang], e, mk, time.Hour); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -810,8 +812,8 @@ func TestValidationOfVariant(t *testing.T) {
 	if m := func() marker { v, _ := st.lookup(key, ""); mk, _ := decodeMarker(v.value); return mk }(); !sameStrings(m.names, names) || !sameStrings(m.codings, []string{"zstd", identity}) {
 		t.Errorf("marker = %+v", m)
 	}
-	if n, _ := st.count(context.Background(), key); n != 3 {
-		t.Errorf("fields = %d, want the marker and 2 variants", n)
+	if n, _ := st.count(context.Background(), key); n != 5 {
+		t.Errorf("fields = %d, want the marker and the 2 fields of 2 variants", n)
 	}
 	browser := http.Header{"Accept-Language": {"fr"}, "Accept-Encoding": {"gzip, br"}}
 	if next := doRequest(c, http.MethodGet, staleURL, browser); !isHit(lastCacheStatus(next)) || next.Body.String() != "old fr" || o.calls != 1 {
@@ -944,5 +946,58 @@ func TestHeadWithoutStoredResponse(t *testing.T) {
 	}
 	if st.sets != 0 || st.dels != 0 {
 		t.Errorf("a HEAD stores nothing (sets %d, dels %d)", st.sets, st.dels)
+	}
+}
+
+// A stored response is validated without its body, which is only read when the
+// client gets it: not when it gets a 304 in turn.
+func TestValidationReadsTheBodyWhenSent(t *testing.T) {
+	entryOnly := []string{""}
+	withBody := []string{"", bodyField("")}
+	tests := []struct {
+		name            string
+		ifNoneMatch     string
+		gone            bool // the body is no longer in the store
+		wantCode        int
+		wantBody        string
+		wantReads       [][]string
+		wantValidations int
+		wantCalls       int
+	}{
+		{name: "§4.3.2 the client has it: 304, the body is not read", ifNoneMatch: `"v1"`, wantCode: 304, wantReads: [][]string{entryOnly}, wantValidations: 1, wantCalls: 1},
+		{name: "§4.3.3 the client has another one: the body is read once validated", ifNoneMatch: `"v0"`, wantCode: 200, wantBody: "old", wantReads: [][]string{entryOnly, withBody}, wantValidations: 1, wantCalls: 1},
+		{name: "validated but its body is gone: the backend is asked for a whole response", ifNoneMatch: `"v0"`, gone: true, wantCode: 200, wantBody: "hello", wantReads: [][]string{entryOnly, withBody}, wantValidations: 1, wantCalls: 2},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			o := newOrigin()
+			c, st := newTestCache(t, o, nil)
+			storeValidated(t, st, "max-age=60", 2*time.Minute)
+			key := redisKey(staleURL)
+			if tt.gone {
+				if err := st.del(context.Background(), key, []string{bodyField("")}); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			rec := doRequest(c, http.MethodGet, staleURL, http.Header{"If-None-Match": {tt.ifNoneMatch}})
+			if rec.Code != tt.wantCode || rec.Body.String() != tt.wantBody {
+				t.Errorf("got %d %q, want %d %q", rec.Code, rec.Body.String(), tt.wantCode, tt.wantBody)
+			}
+			if o.validations != tt.wantValidations || o.calls != tt.wantCalls {
+				t.Errorf("validations = %d, backend calls = %d; want %d, %d", o.validations, o.calls, tt.wantValidations, tt.wantCalls)
+			}
+			if !reflect.DeepEqual(st.reads, tt.wantReads) {
+				t.Errorf("fields read = %q, want %q", st.reads, tt.wantReads)
+			}
+			// Either way, a whole response is stored in the end.
+			want := "old"
+			if tt.gone {
+				want = "hello"
+			}
+			if rec := doRequest(c, http.MethodGet, staleURL, nil); !isHit(lastCacheStatus(rec)) || rec.Body.String() != want {
+				t.Errorf("then: got %q %q, want a hit with %q", lastCacheStatus(rec), rec.Body.String(), want)
+			}
+		})
 	}
 }

@@ -101,7 +101,8 @@ func expect(b *testing.B, rec *httptest.ResponseRecorder, want string) {
 	}
 }
 
-// BenchmarkHit serves a fresh stored response: key, HGET, decoding, write.
+// BenchmarkHit serves a fresh stored response: key, HMGET of the entry and its
+// body, decoding, write.
 func BenchmarkHit(b *testing.B) {
 	for _, size := range sizes {
 		b.Run(size.name, func(b *testing.B) {
@@ -121,7 +122,7 @@ func BenchmarkHit(b *testing.B) {
 }
 
 // BenchmarkHitVariant is BenchmarkHit/1KB for a response with Vary: it adds the
-// HGET of the marker and the selection of the variant by the request headers.
+// marker read along with the variant, and its selection by the request headers.
 func BenchmarkHitVariant(b *testing.B) {
 	h := newHandler(b, &backend{body: make([]byte, 1<<10), cacheControl: longLived, vary: "Accept-Language, Accept-Encoding"}, defaultMaxBody)
 	req := newRequest(http.MethodGet, "/hit-variant?b=2&a=1")
@@ -159,7 +160,7 @@ func BenchmarkHitParallel(b *testing.B) {
 	})
 }
 
-// BenchmarkMiss requests a new URL every time: key, HGET, recording, encoding, HSETEX.
+// BenchmarkMiss requests a new URL every time: key, HMGET, recording, encoding, HSETEX.
 func BenchmarkMiss(b *testing.B) {
 	h := newHandler(b, &backend{body: make([]byte, 1<<10), cacheControl: shortLived}, defaultMaxBody)
 	req := newRequest(http.MethodGet, "/miss")
@@ -202,7 +203,7 @@ func BenchmarkStore(b *testing.B) {
 }
 
 // BenchmarkNotStored is the cost added to a response that may not be cached:
-// key, HGET, and the recorder deciding not to keep the body.
+// key, HMGET, and the recorder deciding not to keep the body.
 func BenchmarkNotStored(b *testing.B) {
 	h := newHandler(b, &backend{body: make([]byte, 1<<10), cacheControl: "no-store"}, defaultMaxBody)
 	req := newRequest(http.MethodGet, "/not-stored")

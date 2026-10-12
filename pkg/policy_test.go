@@ -119,8 +119,19 @@ func TestCurrentAge(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := currentAge(tt.header, tt.requestTime, tt.responseTime, tt.now); got != tt.want {
+			cc := parseCacheControl(tt.header.Values("Cache-Control"))
+			e := &entry{status: 200, header: tt.header, requestTime: tt.requestTime, responseTime: tt.responseTime}
+			setFreshness(e, cc)
+			if got := currentAge(e, tt.now); got != tt.want {
 				t.Errorf("currentAge() = %v, want %v", got, tt.want)
+			}
+			// What the age is worked out from is stored with the entry.
+			stored, err := decodeEntry(encodeEntry(e), 0)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := currentAge(stored, tt.now); got != tt.want {
+				t.Errorf("currentAge() of the stored entry = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -202,7 +213,10 @@ func TestStoreTTL(t *testing.T) {
 			if tt.mutate != nil {
 				tt.mutate(&cfg)
 			}
-			got, ok := storeTTL(req, tt.status, tt.respHdr, cfg, t0, t0)
+			reqCC := parseCacheControl(req.Header.Values("Cache-Control"))
+			cc := parseCacheControl(tt.respHdr.Values("Cache-Control"))
+			e := &entry{status: tt.status, header: tt.respHdr, requestTime: t0, responseTime: t0}
+			got, ok := storeTTL(req, reqCC, e, cc, cfg)
 			if ok != (tt.want > 0) || got != tt.want {
 				t.Errorf("storeTTL() = %v, %v; want %v", got, ok, tt.want)
 			}
@@ -227,7 +241,7 @@ func TestLookupAllowed(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
 			req.Header = tt.header
-			if got := lookupAllowed(req); got != tt.want {
+			if got := lookupAllowed(req, parseCacheControl(req.Header.Values("Cache-Control"))); got != tt.want {
 				t.Errorf("lookupAllowed() = %v, want %v", got, tt.want)
 			}
 		})
@@ -417,7 +431,9 @@ func TestSupersedes(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := supersedes(tt.status, tt.header, testSettings(), t0, t0); got != tt.want {
+			cc := parseCacheControl(tt.header.Values("Cache-Control"))
+			e := &entry{status: tt.status, header: tt.header, requestTime: t0, responseTime: t0}
+			if got := supersedes(e, cc, testSettings()); got != tt.want {
 				t.Errorf("supersedes() = %v, want %v", got, tt.want)
 			}
 		})
@@ -440,7 +456,7 @@ func TestHeaderToStore(t *testing.T) {
 		"X-User":                    {"bob"},
 		"Age":                       {"3"},
 	}
-	got := headerToStore(h)
+	got := headerToStore(h, parseCacheControl(h.Values("Cache-Control")))
 	for _, name := range []string{"Connection", "X-Hop", "Keep-Alive", "Transfer-Encoding", "Content-Length", "Proxy-Authenticate", "Proxy-Authentication-Info", "Set-Cookie", "X-User"} {
 		if got.Get(name) != "" {
 			t.Errorf("%s must not be stored", name)
@@ -454,7 +470,7 @@ func TestHeaderToStore(t *testing.T) {
 	}
 
 	// §3.1: every field is stored unless the response says otherwise.
-	got = headerToStore(http.Header{"Cache-Control": {"max-age=60"}, "Set-Cookie": {"sid=1"}, "X-User": {"bob"}})
+	got = headerToStore(http.Header{"Cache-Control": {"max-age=60"}, "Set-Cookie": {"sid=1"}, "X-User": {"bob"}}, parseCacheControl([]string{"max-age=60"}))
 	if got.Get("Set-Cookie") != "sid=1" || got.Get("X-User") != "bob" {
 		t.Errorf("§3.1 fields that are not excluded must be kept: %v", got)
 	}

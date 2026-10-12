@@ -220,14 +220,17 @@ func TestRevalidationOutcome(t *testing.T) {
 			if replaced := st.sets == 2; replaced != tt.replaced {
 				t.Errorf("replaced = %v, want %v", replaced, tt.replaced)
 			}
-			v, kept := st.lookup(redisKey(staleURL), "")
+			_, kept := st.lookup(redisKey(staleURL), "")
 			if kept == tt.deleted {
 				t.Errorf("deleted = %v, want %v", !kept, tt.deleted)
 			}
+			if _, bodyKept := st.lookup(redisKey(staleURL), bodyField("")); bodyKept != kept {
+				t.Errorf("body kept = %v, entry kept = %v: they go together", bodyKept, kept)
+			}
 			if kept {
-				e, err := decodeEntry(v.value, c.maxEntry)
-				if err != nil {
-					t.Fatal(err)
+				e := st.entry(redisKey(staleURL), "")
+				if e == nil {
+					t.Fatal("field \"\" must hold an entry")
 				}
 				if want := map[bool]string{true: body, false: "old"}[tt.replaced]; string(e.body) != want {
 					t.Errorf("stored body = %q, want %q", e.body, want)

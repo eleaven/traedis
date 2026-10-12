@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 )
 
 // markerVersion prefixes every marker. Bump it on any change of the marker or
@@ -106,12 +107,37 @@ func responseCoding(h http.Header) (string, bool) {
 	return coding, true
 }
 
+// accepts is what the Accept-Encoding of a request says, worked out when a
+// variant is first selected by it and once per request.
+type accepts struct {
+	header     http.Header // of the request
+	parsed     bool
+	codings    []string // see acceptedCodings
+	noIdentity bool     // see identityRefused
+}
+
+// parseAccepts works out a, unless it is done already.
+func parseAccepts(a *accepts) {
+	if a.parsed {
+		return
+	}
+	listed := listedCodings(a.header)
+	a.codings = acceptedOf(listed)
+	a.noIdentity = identityRefused(listed)
+	a.parsed = true
+}
+
 // acceptedCodings returns the codings of contentCodings that a request accepts
 // (RFC 9110 §12.5.3), in the same order. A weight only matters when it is zero:
 // the coding is refused. A request without Accept-Encoding is taken as
 // accepting none of them, as backends do.
 func acceptedCodings(h http.Header) []string {
-	listed := listedCodings(h)
+	return acceptedOf(listedCodings(h))
+}
+
+// acceptedOf returns the codings of contentCodings that listed accepts (see
+// listedCodings).
+func acceptedOf(listed map[string]bool) []string {
 	var accepted []string
 	for _, coding := range contentCodings {
 		ok, found := listed[coding]
@@ -143,8 +169,8 @@ func listedCodings(h http.Header) map[string]bool {
 
 // identityRefused reports whether a request refuses an uncompressed response
 // (RFC 9110 §12.5.3): "identity;q=0", or "*;q=0" when identity is not listed.
-func identityRefused(h http.Header) bool {
-	listed := listedCodings(h)
+// listed is what its Accept-Encoding lists (see listedCodings).
+func identityRefused(listed map[string]bool) bool {
 	if ok, found := listed[identity]; found {
 		return !ok
 	}
@@ -243,11 +269,12 @@ func decodeMarker(b []byte) (marker, bool) {
 }
 
 // field returns the field of the variant to serve a request with header h, or
-// "" when no stored variant can suit it.
-func (m marker) field(h http.Header) string {
+// "" when no stored variant can suit it. a is what the request accepts.
+func (m marker) field(h http.Header, a *accepts) string {
 	coding := ""
 	if slices.Contains(m.names, acceptEncoding) {
-		coding = m.pick(acceptedCodings(h))
+		parseAccepts(a)
+		coding = m.pick(a.codings)
 		if coding == "" {
 			return ""
 		}
@@ -338,15 +365,16 @@ func (v variant) listed(old []string) []string {
 
 // selects reports whether a stored response may answer a request with header h
 // (§4.1): the request headers named by its Vary are those of the request it was
-// stored for. Accept-Encoding is compared by what it means instead (see suits).
-func selects(e *entry, h http.Header) bool {
+// stored for. Accept-Encoding is compared by what it means instead (see suits):
+// a is what the request accepts.
+func selects(e *entry, h http.Header, a *accepts) bool {
 	names, ok := varyNames(e.header)
 	if !ok {
 		return false
 	}
 	for _, name := range names {
 		if name == acceptEncoding {
-			if !suits(e, h) {
+			if !suits(e, a) {
 				return false
 			}
 			continue
@@ -364,29 +392,60 @@ func selects(e *entry, h http.Header) bool {
 }
 
 // suits reports whether a stored response varying by Accept-Encoding may be
-// sent to a request with header h: its content coding is one of those the
+// sent to a request accepting a: its content coding is one of those the
 // request accepts. An uncompressed response is acceptable to all but the
 // requests refusing it (RFC 9110 §12.5.3), but only suits the requests
 // accepting no other coding than the one it was stored for did: offered those,
 // the backend did not compress. Any other request is forwarded, the backend
 // may compress for it.
-func suits(e *entry, h http.Header) bool {
+func suits(e *entry, a *accepts) bool {
 	coding, ok := responseCoding(e.header)
 	if !ok {
 		return false
 	}
-	accepted := acceptedCodings(h)
+	parseAccepts(a)
 	if coding != identity {
-		return slices.Contains(accepted, coding)
+		return slices.Contains(a.codings, coding)
 	}
-	if identityRefused(h) {
+	if a.noIdentity {
 		return false
 	}
 	offered := strings.Split(strings.Join(e.vary[acceptEncoding], ","), ",")
-	for _, c := range accepted {
+	for _, c := range a.codings {
 		if !slices.Contains(offered, c) {
 			return false
 		}
 	}
 	return true
+}
+
+// maxMarkers bounds the markers kept in memory (see markers).
+const maxMarkers = 4096
+
+// markers remembers the marker last seen in the keys whose responses vary. It
+// is only a guess of what Redis holds, which is what counts: it tells find
+// which variant to ask for along with the marker, in one round trip instead of
+// two. It is emptied when full.
+type markers struct {
+	mu    sync.Mutex // guards known, which find reads by itself
+	known map[string]knownMarker
+}
+
+type knownMarker struct {
+	raw    string // the encoded marker
+	marker marker
+}
+
+// set remembers the marker of key, or forgets it when varies is false.
+func (m *markers) set(key string, k knownMarker, varies bool) {
+	m.mu.Lock()
+	if !varies {
+		delete(m.known, key)
+	} else {
+		if m.known == nil || len(m.known) >= maxMarkers {
+			m.known = map[string]knownMarker{}
+		}
+		m.known[key] = k
+	}
+	m.mu.Unlock()
 }

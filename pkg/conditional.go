@@ -17,6 +17,17 @@ import (
 // preconditions (If-Match, If-Unmodified-Since, If-Range) are for the backend.
 var conditions = []string{"If-None-Match", "If-Modified-Since"}
 
+// conditional reports whether a request has conditions that the cache
+// evaluates: its answer may be a 304.
+func conditional(h http.Header) bool {
+	for _, name := range conditions {
+		if len(h.Values(name)) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // notModified reports whether a stored 200 response with header resp, received
 // at the given time, is the one the client says it has: the answer to the
 // request header req is then a 304 (RFC 9110 §13.1, RFC 9111 §4.3.2).
@@ -150,7 +161,7 @@ func headMatches(e *entry, h http.Header) bool {
 	if modified := h.Get("Last-Modified"); modified != "" && modified != e.header.Get("Last-Modified") {
 		return false
 	}
-	if length := h.Get("Content-Length"); length != "" && length != strconv.Itoa(len(e.body)) {
+	if length := h.Get("Content-Length"); length != "" && length != strconv.FormatInt(e.size, 10) {
 		return false
 	}
 	return true
@@ -181,17 +192,22 @@ func refreshed(e *entry, h http.Header, requestTime, responseTime time.Time) *en
 		}
 	}
 	// What the updated response forbids to store (§3.1) is not part of it.
-	for _, name := range parseCacheControl(header.Values("Cache-Control")).unstored {
+	cc := parseCacheControl(header.Values("Cache-Control"))
+	for _, name := range cc.unstored {
 		header.Del(name)
 	}
-	return &entry{
+	out := &entry{
 		status:       e.status,
 		header:       header,
 		body:         e.body,
+		size:         e.size,
 		requestTime:  requestTime,
 		responseTime: responseTime,
 		vary:         e.vary,
+		raw:          e.raw,
 	}
+	setFreshness(out, cc)
+	return out
 }
 
 // ownFields returns the fields of a 304 with header h that are for the client

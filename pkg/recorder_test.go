@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -118,6 +119,36 @@ func TestRecorderSkipsCaptureForLargeContentLength(t *testing.T) {
 	rec.WriteHeader(200)
 	if rec.capture {
 		t.Error("capture must be off when Content-Length exceeds max")
+	}
+}
+
+// With a Content-Length, the copy is allocated once: a body is not copied
+// again and again as it grows.
+func TestRecorderAllocatesItsCopyOnce(t *testing.T) {
+	const size = 64 << 10
+	rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: true}, 1<<20)
+	rec.Header().Set("Content-Length", strconv.Itoa(size))
+	rec.WriteHeader(200)
+	allocated := rec.buf.Cap()
+	if allocated < size {
+		t.Fatalf("allocated = %d, want room for the %d bytes of Content-Length", allocated, size)
+	}
+	chunk := make([]byte, 1<<10)
+	for i := 0; i < size/len(chunk); i++ {
+		_, _ = rec.Write(chunk)
+	}
+	if body, ok := rec.body(); !ok || len(body) != size || rec.buf.Cap() != allocated {
+		t.Errorf("body() = %d bytes, %v; capacity %d, was %d", len(body), ok, rec.buf.Cap(), allocated)
+	}
+
+	// Nothing is allocated from a Content-Length that is not a length.
+	for _, length := range []string{"-1", "0", "many", "99999999999999999999"} {
+		rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: true}, 1<<20)
+		rec.Header().Set("Content-Length", length)
+		rec.WriteHeader(200)
+		if rec.buf.Cap() != 0 {
+			t.Errorf("Content-Length %q: allocated %d bytes", length, rec.buf.Cap())
+		}
 	}
 }
 

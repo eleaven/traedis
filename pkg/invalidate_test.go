@@ -67,7 +67,7 @@ func TestInvalidation(t *testing.T) {
 			storeFresh(t, st, "http://example.com/items/1")
 			storeFresh(t, st, "http://example.com/items/2")
 			// A variant of the target URI, in the same key.
-			if err := st.set(context.Background(), redisKey(invalidatedURL), "variant", []byte("v"), time.Hour); err != nil {
+			if err := st.putRaw(redisKey(invalidatedURL), "variant", []byte("v")); err != nil {
 				t.Fatal(err)
 			}
 

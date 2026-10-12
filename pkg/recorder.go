@@ -76,6 +76,9 @@ func (r *recorder) WriteHeader(code int) {
 	if cl := r.rw.Header().Get("Content-Length"); r.capture && cl != "" {
 		if n, err := strconv.ParseInt(cl, 10, 64); err != nil || n > r.max {
 			r.capture = false
+		} else if n > 0 {
+			// The copy is allocated once, at its size.
+			r.buf.Grow(int(n))
 		}
 	}
 	r.streams = r.rw.Header().Get("Content-Length") == ""

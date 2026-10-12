@@ -6,8 +6,8 @@
 //     which Yaegi lacks, and a Go version newer than the Go 1.22 stdlib it exposes;
 //   - its connection pool relies on select statements, which Yaegi runs
 //     incorrectly from several goroutines (see redisClient);
-//   - it would have to be vendored: tens of thousands of lines, for HGET, HSETEX,
-//     HDEL, HLEN and DEL.
+//   - it would have to be vendored: tens of thousands of lines, for HMGET,
+//     HSETEX, HPEXPIRE, HDEL, HLEN and DEL.
 
 package traedis
 
@@ -29,7 +29,13 @@ const (
 	redisPoolSize = 10
 	// maxLineBytes bounds RESP status lines; longer lines are a protocol error.
 	maxLineBytes = 4096
-	logInterval  = time.Minute
+	// maxArrayItems bounds RESP arrays: the replies to HMGET and HPEXPIRE have
+	// one item per field asked for.
+	maxArrayItems = 16
+	// largeArgBytes is the size from which an argument is written as it is,
+	// instead of being copied into the command (see encodeLargeCommand).
+	largeArgBytes = 16 << 10
+	logInterval   = time.Minute
 )
 
 var (
@@ -49,14 +55,17 @@ func (e redisError) Error() string { return "redis: " + string(e) }
 // select between the goroutines running it, which hands one connection to two
 // requests.
 type redisClient struct {
-	opts     redisOptions
-	maxBulk  int64
-	sem      chan struct{} // one token per connection in use
-	idleMu   sync.Mutex
-	idle     []*redisConn // at most redisPoolSize: only token holders add to it
-	logMu    sync.Mutex
-	lastLog  time.Time
-	logCount int
+	opts    redisOptions
+	maxBulk int64
+	sem     chan struct{} // one token per connection in use
+	// takeToken is the select that takes a token of sem if one is free, built
+	// once: its first case is the send to sem, its second one the default.
+	takeToken []reflect.SelectCase
+	idleMu    sync.Mutex
+	idle      []*redisConn // at most redisPoolSize: only token holders add to it
+	logMu     sync.Mutex
+	lastLog   time.Time
+	logCount  int
 }
 
 type redisConn struct {
@@ -65,61 +74,64 @@ type redisConn struct {
 }
 
 type reply struct {
-	kind byte // '+', '-', ':', '$'
+	kind byte // '+', '-', ':', '*'
 	str  string
 	num  int64
-	bulk []byte
-	null bool
+	// items holds the bulk strings of an array: nil for a null one, and for an
+	// integer.
+	items [][]byte
 }
 
 func newRedisClient(opts redisOptions, maxBulk int64) *redisClient {
+	sem := make(chan struct{}, redisPoolSize)
 	return &redisClient{
 		opts:    opts,
 		maxBulk: maxBulk,
-		sem:     make(chan struct{}, redisPoolSize),
+		sem:     sem,
+		takeToken: []reflect.SelectCase{
+			{Dir: reflect.SelectSend, Chan: reflect.ValueOf(sem), Send: reflect.ValueOf(struct{}{})},
+			{Dir: reflect.SelectDefault},
+		},
 	}
 }
 
-func (c *redisClient) get(ctx context.Context, key, field string) ([]byte, error) {
-	r, err := c.do(ctx, []byte("HGET"), []byte(key), []byte(field))
-	if errors.Is(err, errTooLarge) {
-		return nil, errMiss
+func (c *redisClient) get(ctx context.Context, key string, fields []string) ([][]byte, error) {
+	args := make([][]byte, 0, 2+len(fields))
+	args = append(args, []byte("HMGET"), []byte(key))
+	for _, f := range fields {
+		args = append(args, []byte(f))
 	}
+	r, err := do(ctx, c, args)
 	if err != nil {
+		if errors.Is(err, errTooLarge) {
+			// Not a value of ours: nothing usable is stored.
+			return make([][]byte, len(fields)), nil
+		}
 		return nil, err
 	}
-	if r.null {
-		return nil, errMiss
-	}
-	if r.kind != '$' {
+	if r.kind != '*' || len(r.items) != len(fields) {
 		return nil, errProtocol
 	}
-	return r.bulk, nil
+	return r.items, nil
 }
 
-func (c *redisClient) set(ctx context.Context, key, field string, value []byte, ttl time.Duration) error {
-	return c.hsetex(ctx, key, ttl, false, []byte(field), value)
-}
-
-func (c *redisClient) setVariant(ctx context.Context, key, field string, value, marker []byte, ttl time.Duration, replace bool) error {
-	return c.hsetex(ctx, key, ttl, replace, []byte(""), marker, []byte(field), value)
-}
-
-// hsetex stores fields (name, value, name, value…) in key, all expiring after
-// ttl. With fxx, Redis stores none of them unless they all exist already.
-func (c *redisClient) hsetex(ctx context.Context, key string, ttl time.Duration, fxx bool, fields ...[]byte) error {
+// set runs HSETEX: with replace (FXX), Redis stores none of the fields unless
+// they all exist already.
+func (c *redisClient) set(ctx context.Context, key string, fields []fieldValue, ttl time.Duration, replace bool) error {
 	ms := ttl.Milliseconds()
 	if ms <= 0 {
 		return nil
 	}
 	args := [][]byte{[]byte("HSETEX"), []byte(key)}
-	if fxx {
+	if replace {
 		args = append(args, []byte("FXX"))
 	}
 	args = append(args, []byte("PX"), []byte(strconv.FormatInt(ms, 10)),
-		[]byte("FIELDS"), []byte(strconv.Itoa(len(fields)/2)))
-	args = append(args, fields...)
-	r, err := c.do(ctx, args...)
+		[]byte("FIELDS"), []byte(strconv.Itoa(len(fields))))
+	for _, f := range fields {
+		args = append(args, []byte(f.name), f.value)
+	}
+	r, err := do(ctx, c, args)
 	if err != nil {
 		return err
 	}
@@ -129,8 +141,24 @@ func (c *redisClient) hsetex(ctx context.Context, key string, ttl time.Duration,
 	return nil
 }
 
+func (c *redisClient) expire(ctx context.Context, key, field string, ttl time.Duration) error {
+	ms := ttl.Milliseconds()
+	if ms <= 0 {
+		return nil
+	}
+	r, err := do(ctx, c, [][]byte{[]byte("HPEXPIRE"), []byte(key), []byte(strconv.FormatInt(ms, 10)),
+		[]byte("FIELDS"), []byte("1"), []byte(field)})
+	if err != nil {
+		return err
+	}
+	if r.kind != '*' {
+		return errProtocol
+	}
+	return nil
+}
+
 func (c *redisClient) invalidate(ctx context.Context, key string) error {
-	r, err := c.do(ctx, []byte("DEL"), []byte(key))
+	r, err := do(ctx, c, [][]byte{[]byte("DEL"), []byte(key)})
 	if err != nil {
 		return err
 	}
@@ -141,7 +169,7 @@ func (c *redisClient) invalidate(ctx context.Context, key string) error {
 }
 
 func (c *redisClient) count(ctx context.Context, key string) (int, error) {
-	r, err := c.do(ctx, []byte("HLEN"), []byte(key))
+	r, err := do(ctx, c, [][]byte{[]byte("HLEN"), []byte(key)})
 	if err != nil {
 		return 0, err
 	}
@@ -152,8 +180,13 @@ func (c *redisClient) count(ctx context.Context, key string) (int, error) {
 	return n, nil
 }
 
-func (c *redisClient) del(ctx context.Context, key, field string) error {
-	r, err := c.do(ctx, []byte("HDEL"), []byte(key), []byte(field))
+func (c *redisClient) del(ctx context.Context, key string, fields []string) error {
+	args := make([][]byte, 0, 2+len(fields))
+	args = append(args, []byte("HDEL"), []byte(key))
+	for _, f := range fields {
+		args = append(args, []byte(f))
+	}
+	r, err := do(ctx, c, args)
 	if err != nil {
 		return err
 	}
@@ -163,27 +196,31 @@ func (c *redisClient) del(ctx context.Context, key, field string) error {
 	return nil
 }
 
-// do runs one command. Any failure but an error reply closes the connection:
-// its state is unknown.
-func (c *redisClient) do(ctx context.Context, args ...[]byte) (reply, error) {
+// do runs one command, within the configured timeout. Any failure but an
+// error reply closes the connection: its state is unknown.
+//
+// Like acquire, release and roundTrip, which run for every command too, it is
+// a function rather than a method of the client: under Yaegi, calling a method
+// costs several times what calling a function does.
+func do(ctx context.Context, c *redisClient, args [][]byte) (reply, error) {
 	ctx, cancel := context.WithTimeout(ctx, c.opts.timeout)
 	defer cancel()
 
-	conn, err := c.acquire(ctx)
+	conn, err := acquire(ctx, c)
 	if err != nil {
 		c.logError(err)
 		return reply{}, err
 	}
-	r, err := conn.roundTrip(ctx, c.maxBulk, args)
+	r, err := roundTrip(ctx, conn, c.maxBulk, args)
 	if err != nil {
-		c.release(nil)
+		release(c, nil)
 		_ = conn.nc.Close()
 		if !errors.Is(err, errTooLarge) {
 			c.logError(err)
 		}
 		return reply{}, err
 	}
-	c.release(conn)
+	release(c, conn)
 	if r.kind == '-' {
 		err := redisError(r.str)
 		c.logError(err)
@@ -194,14 +231,19 @@ func (c *redisClient) do(ctx context.Context, args ...[]byte) (reply, error) {
 
 // acquire waits for a pool token, until ctx is done, then returns an idle
 // connection or dials a new one.
-func (c *redisClient) acquire(ctx context.Context) (*redisConn, error) {
-	// select { case c.sem <- struct{}{}: case <-ctx.Done(): }, with operands of our own.
-	chosen, _, _ := reflect.Select([]reflect.SelectCase{
-		{Dir: reflect.SelectSend, Chan: reflect.ValueOf(c.sem), Send: reflect.ValueOf(struct{}{})},
-		{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())},
-	})
+func acquire(ctx context.Context, c *redisClient) (*redisConn, error) {
+	// select { case c.sem <- struct{}{}: default: }: most of the time, a token
+	// is free.
+	chosen, _, _ := reflect.Select(c.takeToken)
 	if chosen != 0 {
-		return nil, fmt.Errorf("redis: pool exhausted: %w", ctx.Err())
+		// select { case c.sem <- struct{}{}: case <-ctx.Done(): }
+		chosen, _, _ = reflect.Select([]reflect.SelectCase{
+			c.takeToken[0],
+			{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())},
+		})
+		if chosen != 0 {
+			return nil, fmt.Errorf("redis: pool exhausted: %w", ctx.Err())
+		}
 	}
 
 	var conn *redisConn
@@ -224,7 +266,7 @@ func (c *redisClient) acquire(ctx context.Context) (*redisConn, error) {
 }
 
 // release returns a healthy connection to the pool (nil for a closed one).
-func (c *redisClient) release(conn *redisConn) {
+func release(c *redisClient, conn *redisConn) {
 	if conn != nil {
 		c.idleMu.Lock()
 		c.idle = append(c.idle, conn)
@@ -253,7 +295,7 @@ func (c *redisClient) dial(ctx context.Context) (*redisConn, error) {
 		setup = append(setup, [][]byte{[]byte("SELECT"), []byte(strconv.Itoa(c.opts.db))})
 	}
 	for _, args := range setup {
-		r, err := conn.roundTrip(ctx, c.maxBulk, args)
+		r, err := roundTrip(ctx, conn, c.maxBulk, args)
 		if err == nil && r.kind == '-' {
 			err = redisError(r.str)
 		}
@@ -265,22 +307,30 @@ func (c *redisClient) dial(ctx context.Context) (*redisConn, error) {
 	return conn, nil
 }
 
-func (conn *redisConn) roundTrip(ctx context.Context, maxBulk int64, args [][]byte) (reply, error) {
+// roundTrip sends a command and reads its reply, until the deadline of ctx.
+func roundTrip(ctx context.Context, conn *redisConn, maxBulk int64, args [][]byte) (reply, error) {
 	if deadline, ok := ctx.Deadline(); ok {
 		if err := conn.nc.SetDeadline(deadline); err != nil {
 			return reply{}, err
 		}
 	}
-	if _, err := conn.nc.Write(encodeCommand(args)); err != nil {
+	if err := writeCommand(conn.nc, args); err != nil {
 		return reply{}, err
 	}
 	return readReply(conn.r, maxBulk)
 }
 
-func encodeCommand(args [][]byte) []byte {
+// writeCommand sends a command: in one buffer, unless it is large (see
+// encodeLargeCommand).
+func writeCommand(nc net.Conn, args [][]byte) error {
 	size := 16
 	for _, a := range args {
 		size += len(a) + 16
+	}
+	if size >= largeArgBytes {
+		command := encodeLargeCommand(args)
+		_, err := command.WriteTo(nc)
+		return err
 	}
 	b := make([]byte, 0, size)
 	b = append(b, '*')
@@ -293,55 +343,103 @@ func encodeCommand(args [][]byte) []byte {
 		b = append(b, a...)
 		b = append(b, '\r', '\n')
 	}
-	return b
+	_, err := nc.Write(b)
+	return err
 }
 
-// readReply reads one RESP2 reply. The server is not trusted: line lengths are
-// bounded and bulk lengths are checked against maxBulk before allocating.
-func readReply(r *bufio.Reader, maxBulk int64) (reply, error) {
-	line, err := r.ReadSlice('\n')
-	if err != nil {
-		if errors.Is(err, bufio.ErrBufferFull) {
-			return reply{}, errProtocol
+// encodeLargeCommand encodes a command without copying its large arguments,
+// the bodies: they go to the connection as they are, in one write with the
+// rest.
+func encodeLargeCommand(args [][]byte) net.Buffers {
+	var bufs net.Buffers
+	b := make([]byte, 0, 256)
+	b = append(b, '*')
+	b = strconv.AppendInt(b, int64(len(args)), 10)
+	b = append(b, '\r', '\n')
+	for _, a := range args {
+		b = append(b, '$')
+		b = strconv.AppendInt(b, int64(len(a)), 10)
+		b = append(b, '\r', '\n')
+		if len(a) >= largeArgBytes {
+			bufs = append(bufs, b, a)
+			b = make([]byte, 0, 256)
+		} else {
+			b = append(b, a...)
 		}
-		return reply{}, err
+		b = append(b, '\r', '\n')
 	}
-	if len(line) < 3 || line[len(line)-2] != '\r' {
-		return reply{}, errProtocol
-	}
-	kind := line[0]
-	payload := string(line[1 : len(line)-2])
+	return append(bufs, b)
+}
 
-	switch kind {
-	case '+', '-':
-		return reply{kind: kind, str: payload}, nil
-	case ':':
-		n, err := strconv.ParseInt(payload, 10, 64)
+// readReply reads one RESP2 reply: a status, an error, an integer, or an array
+// of bulk strings and integers, which is all that our commands get. The server
+// is not trusted: line lengths and array lengths are bounded, and bulk lengths
+// are checked against maxBulk before allocating.
+//
+// It is one loop over the lines of the reply, the first one then one per item
+// of an array, rather than a function called for each value: under Yaegi, the
+// calls would cost more than the parsing.
+func readReply(r *bufio.Reader, maxBulk int64) (reply, error) {
+	var out reply
+	for i := -1; i < len(out.items); i++ {
+		line, err := r.ReadSlice('\n')
 		if err != nil {
-			return reply{}, errProtocol
-		}
-		return reply{kind: kind, num: n}, nil
-	case '$':
-		n, err := strconv.ParseInt(payload, 10, 64)
-		if err != nil || n < -1 {
-			return reply{}, errProtocol
-		}
-		if n == -1 {
-			return reply{kind: kind, null: true}, nil
-		}
-		if n > maxBulk {
-			return reply{}, errTooLarge
-		}
-		buf := make([]byte, n+2)
-		if _, err := io.ReadFull(r, buf); err != nil {
+			if errors.Is(err, bufio.ErrBufferFull) {
+				return reply{}, errProtocol
+			}
 			return reply{}, err
 		}
-		if buf[n] != '\r' || buf[n+1] != '\n' {
+		if len(line) < 3 || line[len(line)-2] != '\r' {
 			return reply{}, errProtocol
 		}
-		return reply{kind: kind, bulk: buf[:n]}, nil
+		kind := line[0]
+		payload := string(line[1 : len(line)-2])
+
+		if i >= 0 {
+			// An item of the array: nothing is kept of an integer, nor of a
+			// null bulk string.
+			if kind == ':' || (kind == '$' && payload == "-1") {
+				continue
+			}
+			n, err := strconv.ParseInt(payload, 10, 64)
+			if kind != '$' || err != nil || n < 0 {
+				return reply{}, errProtocol
+			}
+			if n > maxBulk {
+				return reply{}, errTooLarge
+			}
+			buf := make([]byte, n+2)
+			if _, err := io.ReadFull(r, buf); err != nil {
+				return reply{}, err
+			}
+			if buf[n] != '\r' || buf[n+1] != '\n' {
+				return reply{}, errProtocol
+			}
+			out.items[i] = buf[:n]
+			continue
+		}
+
+		switch kind {
+		case '+', '-':
+			return reply{kind: kind, str: payload}, nil
+		case ':', '*':
+			n, err := strconv.ParseInt(payload, 10, 64)
+			if err != nil {
+				return reply{}, errProtocol
+			}
+			if kind == ':' {
+				return reply{kind: kind, num: n}, nil
+			}
+			if n < 0 || n > maxArrayItems {
+				return reply{}, errProtocol
+			}
+			out.kind = kind
+			out.items = make([][]byte, n)
+		default:
+			return reply{}, errProtocol
+		}
 	}
-	return reply{}, errProtocol
+	return out, nil
 }
 
 // logError reports Redis failures at most once per logInterval, with the number

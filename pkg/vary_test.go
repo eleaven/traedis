@@ -215,7 +215,7 @@ func TestMarkerField(t *testing.T) {
 			if tt.want != "" {
 				want = variantField(names, h, tt.want)
 			}
-			if got := (marker{names: names, codings: tt.codings}).field(h); got != want {
+			if got := (marker{names: names, codings: tt.codings}).field(h, &accepts{header: h}); got != want {
 				t.Errorf("field() = %q, want the field of %q", got, tt.want)
 			}
 		})
@@ -224,7 +224,7 @@ func TestMarkerField(t *testing.T) {
 	// Without Accept-Encoding in Vary, the field only depends on the request.
 	m := marker{names: []string{"Accept-Language"}}
 	h := http.Header{"Accept-Language": {"fr"}}
-	if got := m.field(h); got != variantField(m.names, h, "") {
+	if got := m.field(h, &accepts{header: h}); got != variantField(m.names, h, "") {
 		t.Errorf("field() = %q", got)
 	}
 }
@@ -298,7 +298,7 @@ func TestSelects(t *testing.T) {
 			if tt.encoding != "" {
 				e.header.Set("Content-Encoding", tt.encoding)
 			}
-			if got := selects(e, tt.reqHdr); got != tt.want {
+			if got := selects(e, tt.reqHdr, &accepts{header: tt.reqHdr}); got != tt.want {
 				t.Errorf("selects() = %v, want %v", got, tt.want)
 			}
 		})
@@ -392,13 +392,14 @@ func TestVariants(t *testing.T) {
 		t.Errorf("backend calls = %d, want 3", b.calls)
 	}
 
-	// One hash per URI: the marker in field "", one field per variant.
+	// One hash per URI: the marker in field "", two fields per variant (its
+	// entry and its body).
 	key := redisKey(varyURL)
 	if m := storedMarker(t, st); !sameStrings(m.names, []string{"Accept-Language"}) || len(m.codings) != 0 {
 		t.Errorf("marker = %+v", m)
 	}
-	if n, _ := st.count(context.Background(), key); n != 4 {
-		t.Errorf("fields = %d, want the marker and 3 variants", n)
+	if n, _ := st.count(context.Background(), key); n != 7 {
+		t.Errorf("fields = %d, want the marker and the 2 fields of 3 variants", n)
 	}
 	field := variantField([]string{"Accept-Language"}, http.Header{"Accept-Language": {"fr"}}, "")
 	v, ok := st.lookup(key, field)
@@ -411,9 +412,12 @@ func TestVariants(t *testing.T) {
 	if mk, _ := st.lookup(key, ""); mk.ttl != v.ttl && !closeTo(mk.ttl, time.Minute+time.Hour) {
 		t.Errorf("marker ttl = %v, want the one of its variant", mk.ttl)
 	}
-	e, err := decodeEntry(v.value, c.maxEntry)
-	if err != nil {
-		t.Fatal(err)
+	if body, _ := st.lookup(key, bodyField(field)); body.ttl != v.ttl {
+		t.Errorf("body ttl = %v, want the one of its entry (%v)", body.ttl, v.ttl)
+	}
+	e := st.entry(key, field)
+	if e == nil {
+		t.Fatal("the field of the variant must hold an entry")
 	}
 	if !reflect.DeepEqual(e.vary, http.Header{"Accept-Language": {"fr"}}) || string(e.body) != "lang=fr" {
 		t.Errorf("stored entry: vary = %v, body = %q", e.vary, e.body)
@@ -490,8 +494,8 @@ func TestVariantsByContentCoding(t *testing.T) {
 	if b.calls != 3 {
 		t.Errorf("backend calls = %d, want one per content coding", b.calls)
 	}
-	if n, _ := st.count(context.Background(), redisKey(varyURL)); n != 4 {
-		t.Errorf("fields = %d, want the marker and 3 variants: clients cannot make variants", n)
+	if n, _ := st.count(context.Background(), redisKey(varyURL)); n != 7 {
+		t.Errorf("fields = %d, want the marker and the 2 fields of 3 variants: clients cannot make variants", n)
 	}
 	if b.lastReq.Header.Get("Accept-Encoding") != "" {
 		t.Error("the backend must get the request as the client sent it")
@@ -550,7 +554,7 @@ func TestUncompressedVariant(t *testing.T) {
 				t.Errorf("step %d (Accept-Encoding %q): Cache-Status = %q, want hit = %v", i, step.accept, lastCacheStatus(rec), step.hit)
 			}
 		}
-		if n, _ := st.count(context.Background(), redisKey(varyURL)); n != 2 || b.calls != 3 {
+		if n, _ := st.count(context.Background(), redisKey(varyURL)); n != 3 || b.calls != 3 {
 			t.Errorf("fields = %d, backend calls = %d: want the marker and one variant, stored 3 times", n, b.calls)
 		}
 	})
@@ -566,7 +570,7 @@ func TestOutdatedCodingIsUnlisted(t *testing.T) {
 		wantStatus string
 	}{
 		{name: "variant expired in Redis", wantStatus: varyMiss, outdate: func(t *testing.T, st *memStore, field string) {
-			if err := st.del(context.Background(), redisKey(varyURL), field); err != nil {
+			if err := st.del(context.Background(), redisKey(varyURL), []string{field, bodyField(field)}); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -578,7 +582,7 @@ func TestOutdatedCodingIsUnlisted(t *testing.T) {
 				vary:        http.Header{"Accept-Encoding": {"zstd,br"}},
 				requestTime: at, responseTime: at,
 			}
-			if err := st.set(context.Background(), redisKey(varyURL), field, encodeEntry(e), time.Hour); err != nil {
+			if err := st.put(redisKey(varyURL), field, e, nil, time.Hour); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -651,8 +655,8 @@ func TestVariantsAreCapped(t *testing.T) {
 			for i := 0; i < limit; i++ {
 				doRequest(c, http.MethodGet, varyURL, lang(i))
 			}
-			if n, _ := st.count(context.Background(), key); n != limit+1 {
-				t.Fatalf("fields = %d, want the marker and %d variants", n, limit)
+			if n, _ := st.count(context.Background(), key); n != 2*limit+1 {
+				t.Fatalf("fields = %d, want the marker and the 2 fields of %d variants", n, limit)
 			}
 
 			// A new variant is not stored, and evicts none.
@@ -662,7 +666,7 @@ func TestVariantsAreCapped(t *testing.T) {
 					t.Errorf("variant over the limit: got %q %q", lastCacheStatus(rec), rec.Body.String())
 				}
 			}
-			if n, _ := st.count(context.Background(), key); n != limit+1 || st.sets != limit {
+			if n, _ := st.count(context.Background(), key); n != 2*limit+1 || st.sets != limit {
 				t.Errorf("fields = %d, sets = %d: nothing must be stored past the limit", n, st.sets)
 			}
 			for i := 0; i < limit; i++ {
@@ -822,13 +826,13 @@ func TestUntrustedVariant(t *testing.T) {
 		wantStatus string
 	}{
 		{name: "corrupt marker", wantStatus: uriMiss, tamper: func(st *memStore) error {
-			return st.set(context.Background(), key, "", []byte("TRV1\x00"), time.Hour)
+			return st.putRaw(key, "", []byte("TRV1\x00"))
 		}},
 		{name: "marker of another version", wantStatus: uriMiss, tamper: func(st *memStore) error {
-			return st.set(context.Background(), key, "", []byte("TRV0Accept-Language\n"), time.Hour)
+			return st.putRaw(key, "", []byte("TRV0Accept-Language\n"))
 		}},
 		{name: "corrupt variant", wantStatus: varyMiss, tamper: func(st *memStore) error {
-			return st.set(context.Background(), key, field, []byte("TRD1garbage"), time.Hour)
+			return st.putRaw(key, field, []byte(entryVersion+"garbage"))
 		}},
 		{name: "§4.1 variant selected by other request values", wantStatus: varyMiss, tamper: func(st *memStore) error {
 			e := &entry{
@@ -838,7 +842,7 @@ func TestUntrustedVariant(t *testing.T) {
 				vary:        http.Header{"Accept-Language": {"en"}},
 				requestTime: now, responseTime: now,
 			}
-			return st.set(context.Background(), key, field, encodeEntry(e), time.Hour)
+			return st.put(key, field, e, nil, time.Hour)
 		}},
 		{name: "§4.1 variant with another Vary", wantStatus: varyMiss, tamper: func(st *memStore) error {
 			e := &entry{
@@ -848,10 +852,10 @@ func TestUntrustedVariant(t *testing.T) {
 				vary:        http.Header{"Accept-Language": {"fr"}, "X-Device": {"tv"}},
 				requestTime: now, responseTime: now,
 			}
-			return st.set(context.Background(), key, field, encodeEntry(e), time.Hour)
+			return st.put(key, field, e, nil, time.Hour)
 		}},
 		{name: "variant missing", wantStatus: varyMiss, tamper: func(st *memStore) error {
-			return st.del(context.Background(), key, field)
+			return st.del(context.Background(), key, []string{field, bodyField(field)})
 		}},
 	}
 	for _, tt := range tests {
@@ -898,11 +902,11 @@ type failingStore struct {
 	failGet, failCount bool
 }
 
-func (s *failingStore) get(ctx context.Context, key, field string) ([]byte, error) {
+func (s *failingStore) get(ctx context.Context, key string, fields []string) ([][]byte, error) {
 	if s.failGet {
 		return nil, errors.New("redis down")
 	}
-	return s.memStore.get(ctx, key, field)
+	return s.memStore.get(ctx, key, fields)
 }
 
 func (s *failingStore) count(ctx context.Context, key string) (int, error) {
@@ -931,8 +935,8 @@ func TestSaveVariantStopsOnRedisError(t *testing.T) {
 			tt.fail(st)
 
 			v := variant{names: []string{"Accept-Encoding"}, field: "f", coding: "br", accepted: []string{"br"}}
-			c.saveVariant(context.Background(), redisKey(varyURL), v, []byte("data"), time.Minute)
-			if st.sets != 0 {
+			stored := c.put(context.Background(), redisKey(varyURL), v, []fieldValue{{name: "f", value: []byte("data")}}, time.Minute)
+			if stored || st.sets != 0 {
 				t.Error("nothing must be written to a failing Redis")
 			}
 		})
@@ -945,7 +949,7 @@ func TestStaleVariantIsRevalidated(t *testing.T) {
 	names := []string{"Accept-Encoding", "Accept-Language"}
 	key := redisKey(varyURL)
 	at := time.Now().Add(-70 * time.Second)
-	stale := func(lang string) (string, []byte) {
+	stale := func(lang string) (string, *entry) {
 		e := &entry{
 			status:      200,
 			header:      http.Header{"Cache-Control": {"max-age=60, stale-while-revalidate=30"}, "Vary": {b.vary}, "Content-Encoding": {"gzip"}},
@@ -953,16 +957,17 @@ func TestStaleVariantIsRevalidated(t *testing.T) {
 			vary:        http.Header{"Accept-Language": {lang}, "Accept-Encoding": {"gzip"}},
 			requestTime: at, responseTime: at,
 		}
-		return variantField(names, http.Header{"Accept-Language": {lang}}, "gzip"), encodeEntry(e)
+		return variantField(names, http.Header{"Accept-Language": {lang}}, "gzip"), e
 	}
 	mk := encodeMarker(marker{names: names, codings: []string{"gzip"}})
-	frField, frData := stale("fr")
-	enField, enData := stale("en")
-	for field, data := range map[string][]byte{frField: frData, enField: enData} {
-		if err := st.setVariant(context.Background(), key, field, data, mk, time.Hour, false); err != nil {
+	frField, frEntry := stale("fr")
+	enField, enEntry := stale("en")
+	for field, e := range map[string]*entry{frField: frEntry, enField: enEntry} {
+		if err := st.put(key, field, e, mk, time.Hour); err != nil {
 			t.Fatal(err)
 		}
 	}
+	enData, _ := st.lookup(key, enField)
 
 	req := httptest.NewRequest(http.MethodGet, varyURL, nil)
 	req.Header.Set("Accept-Language", "fr")
@@ -982,8 +987,11 @@ func TestStaleVariantIsRevalidated(t *testing.T) {
 		t.Errorf("after revalidation: %q %q (backend calls %d)", rec.Body.String(), lastCacheStatus(rec), b.calls)
 	}
 	// The other variant was left as it was.
-	if v, _ := st.lookup(key, enField); string(v.value) != string(enData) {
+	if v, _ := st.lookup(key, enField); string(v.value) != string(enData.value) {
 		t.Error("the revalidation of a variant must not touch the others")
+	}
+	if body, _ := st.lookup(key, bodyField(enField)); string(body.value) != "old en" {
+		t.Errorf("the revalidation of a variant must not touch the body of the others: %q", body.value)
 	}
 }
 
@@ -1004,7 +1012,7 @@ func TestSupersededVariantIsDeleted(t *testing.T) {
 			requestTime: at, responseTime: at,
 		}
 		fields[lang] = variantField(names, http.Header{"Accept-Language": {lang}}, "")
-		if err := st.setVariant(context.Background(), key, fields[lang], encodeEntry(e), mk, time.Hour, false); err != nil {
+		if err := st.put(key, fields[lang], e, mk, time.Hour); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -1042,7 +1050,7 @@ func TestStaleIfErrorServesTheVariant(t *testing.T) {
 		requestTime: at, responseTime: at,
 	}
 	mk := encodeMarker(marker{names: names})
-	if err := st.setVariant(context.Background(), redisKey(varyURL), variantField(names, fr, ""), encodeEntry(e), mk, time.Hour, false); err != nil {
+	if err := st.put(redisKey(varyURL), variantField(names, fr, ""), e, mk, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1053,5 +1061,74 @@ func TestStaleIfErrorServesTheVariant(t *testing.T) {
 	rec = doRequest(c, http.MethodGet, varyURL, http.Header{"Accept-Language": {"en"}})
 	if rec.Code != 503 || lastCacheStatus(rec) != "traedis; fwd=vary-miss; fwd-status=503" {
 		t.Errorf("another variant has nothing to be served instead: got %d %q", rec.Code, lastCacheStatus(rec))
+	}
+}
+
+// One round trip per hit, variants included: the marker last seen in a key
+// tells which variant to ask for along with it.
+func TestVariantIsReadInOneRoundTrip(t *testing.T) {
+	b := &negotiator{vary: "Accept-Language"}
+	c, st := newTestCache(t, b, nil)
+	fr := http.Header{"Accept-Language": {"fr"}}
+	key := redisKey(varyURL)
+	field := variantField([]string{"Accept-Language"}, fr, "")
+	guessed := []string{"", field, bodyField(field)}
+	unknown := []string{"", bodyField("")}
+	hit := func(step string, c *cache, wantReads [][]string) {
+		t.Helper()
+		st.reads = nil
+		rec := doRequest(c, http.MethodGet, varyURL, fr)
+		if !isHit(lastCacheStatus(rec)) || rec.Body.String() != "lang=fr" {
+			t.Errorf("%s: got %q %q, want a hit", step, lastCacheStatus(rec), rec.Body.String())
+		}
+		if !reflect.DeepEqual(st.reads, wantReads) {
+			t.Errorf("%s: fields read = %q, want %q", step, st.reads, wantReads)
+		}
+	}
+
+	doRequest(c, http.MethodGet, varyURL, fr)
+	hit("the marker was just stored", c, [][]string{guessed})
+
+	// Another Traefik instance, or this one restarted: the marker is learnt.
+	other := newCache(b, "cache", c.cfg, st)
+	hit("marker never seen", other, [][]string{unknown, guessed})
+	hit("marker seen", other, [][]string{guessed})
+
+	// The other instance stores a response with another Vary: another marker.
+	b.vary = "Accept-Language, X-Device"
+	doRequest(c, http.MethodGet, varyURL, http.Header{"Accept-Language": {"fr"}, "Cache-Control": {"no-cache"}})
+	changed := variantField([]string{"Accept-Language", "X-Device"}, fr, "")
+	hit("marker changed", other, [][]string{guessed, {"", changed, bodyField(changed)}})
+	hit("marker seen again", other, [][]string{{"", changed, bodyField(changed)}})
+
+	// The key is gone: nothing more is read, and the marker is forgotten.
+	if err := st.invalidate(context.Background(), key); err != nil {
+		t.Fatal(err)
+	}
+	st.reads = nil
+	e, _, miss, err := other.find(context.Background(), key, fr, true)
+	if e != nil || miss != "uri-miss" || err != nil || len(st.reads) != 1 {
+		t.Errorf("key gone: find() = %v, %q, %v after reading %q", e, miss, err, st.reads)
+	}
+	if _, known := other.markers.known[key]; known {
+		t.Error("key gone: its marker must be forgotten")
+	}
+}
+
+func TestMarkersAreBounded(t *testing.T) {
+	m := &markers{}
+	for i := 0; i <= maxMarkers; i++ {
+		m.set("k"+strconv.Itoa(i), knownMarker{raw: "TRV1Accept-Language\n"}, true)
+	}
+	if len(m.known) == 0 || len(m.known) > maxMarkers {
+		t.Errorf("markers kept = %d, want at most %d", len(m.known), maxMarkers)
+	}
+	last := "k" + strconv.Itoa(maxMarkers)
+	if _, ok := m.known[last]; !ok {
+		t.Error("the last marker seen must be kept")
+	}
+	m.set(last, knownMarker{}, false)
+	if _, ok := m.known[last]; ok {
+		t.Error("the marker of a key that no longer varies must be forgotten")
 	}
 }

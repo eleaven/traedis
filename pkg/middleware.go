@@ -1,8 +1,8 @@
 package traedis
 
 import (
+	"bytes"
 	"context"
-	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -10,17 +10,17 @@ import (
 	"time"
 )
 
-// entryOverhead is the room left for headers and metadata in a stored entry,
-// on top of maxBodyBytes.
+// entryOverhead bounds an encoded entry, the header and metadata of a stored
+// response: its body, stored apart, is bounded by maxBodyBytes.
 const entryOverhead = 1 << 20
 
 // cache is the middleware handler.
 type cache struct {
-	next     http.Handler
-	name     string
-	cfg      settings
-	store    store
-	maxEntry int64
+	next    http.Handler
+	name    string
+	cfg     settings
+	store   store
+	markers *markers
 
 	revalMu      sync.Mutex
 	revalidating map[string]bool // keys being revalidated, at most maxRevalidations
@@ -33,14 +33,13 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 	if err != nil {
 		return nil, err
 	}
-	c := newCache(next, name, cfg, nil)
-	c.store = newRedisClient(cfg.redis, c.maxEntry)
-	return c, nil
+	// No value of ours is larger than a body and an entry.
+	return newCache(next, name, cfg, newRedisClient(cfg.redis, cfg.maxBodyBytes+entryOverhead)), nil
 }
 
 func newCache(next http.Handler, name string, cfg settings, s store) *cache {
 	return &cache{
-		next: next, name: name, cfg: cfg, store: s, maxEntry: cfg.maxBodyBytes + entryOverhead,
+		next: next, name: name, cfg: cfg, store: s, markers: &markers{},
 		revalidating: map[string]bool{},
 	}
 }
@@ -66,13 +65,16 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	reqCC := parseCacheControl(r.Header.Values("Cache-Control"))
 
-	if !lookupAllowed(r) {
+	if !lookupAllowed(r, reqCC) {
 		status.fwd = "request"
 		c.forward(w, r, key, "", reqCC, status, true, nil)
 		return
 	}
 
-	stored, field, miss, err := c.find(r.Context(), key, r.Header)
+	// The body is only read along with the entry when the answer is sure to
+	// have it: neither a HEAD nor a possible 304 (see ready).
+	withBody := r.Method == http.MethodGet && !conditional(r.Header)
+	stored, field, miss, err := c.find(r.Context(), key, r.Header, withBody)
 	if err != nil {
 		// Fail open; don't try to write to a failing Redis.
 		status.fwd = "bypass"
@@ -82,32 +84,41 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	status.fwd = miss
 	if stored != nil {
-		cc := parseCacheControl(stored.header.Values("Cache-Control"))
-		age := currentAge(stored.header, stored.requestTime, stored.responseTime, time.Now())
-		lifetime := freshnessLifetime(stored, cc, c.cfg.defaultTTL)
-		if servable(reqCC, age, lifetime) {
+		age := currentAge(stored, time.Now())
+		lifetime := freshnessLifetime(stored, c.cfg.defaultTTL)
+		// detail is how a stale response may be served, if it may.
+		detail := ""
+		usable := servable(reqCC, age, lifetime)
+		if !usable {
+			// Only a stale response has its Cache-Control parsed.
+			cc := parseCacheControl(stored.header.Values("Cache-Control"))
+			if servableWhileRevalidating(reqCC, cc, age-lifetime, c.cfg) {
+				detail = "stale-while-revalidate"
+			} else if servableOnRequest(reqCC, cc, age, lifetime, c.cfg.staleTTL) {
+				detail = "max-stale"
+			}
+			usable = detail != ""
+		}
+		// Read with its body, the entry is ready.
+		if usable && (withBody || c.ready(r, key, field, stored)) {
+			if detail == "stale-while-revalidate" {
+				c.revalidate(r, key, field, stored)
+			}
 			status.hit = true
+			status.detail = detail
 			c.serve(w, r, stored, age, lifetime, status)
 			return
 		}
-		if servableWhileRevalidating(reqCC, cc, age-lifetime, c.cfg) {
-			c.revalidate(r, key, field, stored)
-			status.hit = true
-			status.detail = "stale-while-revalidate"
-			c.serve(w, r, stored, age, lifetime, status)
-			return
-		}
-		if servableOnRequest(reqCC, cc, age, lifetime, c.cfg.staleTTL) {
-			status.hit = true
-			status.detail = "max-stale"
-			c.serve(w, r, stored, age, lifetime, status)
-			return
-		}
-		// RFC 9211 §2.2: the response is stale, or fresh but not what the
-		// request asks for (max-age, min-fresh).
-		status.fwd = "stale"
-		if age < lifetime {
-			status.fwd = "request"
+		if usable {
+			// The store no longer has its body: nothing stored can answer.
+			stored = nil
+		} else {
+			// RFC 9211 §2.2: the response is stale, or fresh but not what the
+			// request asks for (max-age, min-fresh).
+			status.fwd = "stale"
+			if age < lifetime {
+				status.fwd = "request"
+			}
 		}
 	}
 	c.forward(w, r, key, field, reqCC, status, true, stored)
@@ -116,31 +127,97 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // find returns the stored response of key selected by the request header h
 // (§4.1) and the field it is in, or none. miss is then why: uri-miss, or
 // vary-miss when the key holds variants. An error is a Redis failure.
-func (c *cache) find(ctx context.Context, key string, h http.Header) (*entry, string, string, error) {
-	field := ""
+//
+// The field "" of the key tells where the response is: it is the entry itself,
+// or the marker that selects a variant. One round trip is enough when the
+// marker is the one last seen there (see markers): the variant it selects is
+// asked for along with it. A wrong guess takes a second one.
+//
+// With withBody, the body is read along with the entry. Otherwise it is left
+// in the store, for ready to read if the answer turns out to have one.
+func (c *cache) find(ctx context.Context, key string, h http.Header, withBody bool) (*entry, string, string, error) {
+	a := &accepts{header: h}
 	miss := "uri-miss"
-	raw, err := c.store.get(ctx, key, "")
-	if mk, ok := decodeMarker(raw); err == nil && ok {
-		// The responses of this URI vary: the one selected by the request, if
-		// any, is in a field of its own.
-		miss = "vary-miss"
-		field = mk.field(h)
-		err = errMiss
-		if field != "" {
-			raw, err = c.store.get(ctx, key, field)
+	// Read here, not by a method of markers: under Yaegi, the call would cost
+	// several times the lookup.
+	c.markers.mu.Lock()
+	known, varies := c.markers.known[key]
+	c.markers.mu.Unlock()
+	for attempt := 0; attempt < 2; attempt++ {
+		field := ""
+		fields := []string{""}
+		if varies {
+			miss = "vary-miss"
+			if field = known.marker.field(h, a); field != "" {
+				fields = append(fields, field)
+			}
 		}
+		if withBody && (!varies || field != "") {
+			fields = append(fields, bodyField(field))
+		}
+		values, err := c.store.get(ctx, key, fields)
+		if err != nil {
+			return nil, field, miss, err
+		}
+		if values[0] == nil {
+			// Nothing in the key: no response, and no marker any more.
+			if varies {
+				c.markers.set(key, knownMarker{}, false)
+			}
+			return nil, "", "uri-miss", nil
+		}
+		if !varies || string(values[0]) != known.raw {
+			if mk, ok := decodeMarker(values[0]); ok || varies {
+				// Wrong guess: the key has another marker, or one where it had
+				// none, or none any more. (Two assignments: Yaegi v0.16.1 gets
+				// the parallel one wrong.)
+				known = knownMarker{raw: string(values[0]), marker: mk}
+				varies = ok
+				c.markers.set(key, known, varies)
+				miss = "uri-miss"
+				continue
+			}
+		}
+
+		// The entry is in field "", or in the field of its own that the marker
+		// selects, if any.
+		at := 0
+		if varies {
+			at = 1
+		}
+		if at == len(fields) || values[at] == nil {
+			return nil, field, miss, nil
+		}
+		e, err := decodeEntry(values[at], c.cfg.maxBodyBytes)
+		if err != nil || !selects(e, h, a) {
+			return nil, field, miss, nil
+		}
+		if withBody {
+			if int64(len(values[at+1])) != e.size {
+				return nil, field, miss, nil
+			}
+			e.body = values[at+1]
+		}
+		return e, field, miss, nil
 	}
-	if errors.Is(err, errMiss) {
-		return nil, field, miss, nil
+	// The key changed twice while it was read.
+	return nil, "", miss, nil
+}
+
+// ready reports whether e, the entry of field, can answer r: its body is read
+// from the store now, when find left it there and the answer has one. It is
+// not when the store no longer has the entry as it was read: the body there
+// may be the one of another response.
+func (c *cache) ready(r *http.Request, key, field string, e *entry) bool {
+	if e.body != nil || e.size == 0 || !sendsBody(r, e) {
+		return true
 	}
-	if err != nil {
-		return nil, field, miss, err
+	values, err := c.store.get(r.Context(), key, []string{field, bodyField(field)})
+	if err != nil || !bytes.Equal(values[0], e.raw) || int64(len(values[1])) != e.size {
+		return false
 	}
-	e, err := decodeEntry(raw, c.maxEntry)
-	if err != nil || !selects(e, h) {
-		return nil, field, miss, nil
-	}
-	return e, field, miss, nil
+	e.body = values[1]
+	return true
 }
 
 // passThrough proxies a request the cache has nothing to do with (OPTIONS,
@@ -167,7 +244,7 @@ func expectsStream(r *http.Request) bool {
 }
 
 // serve answers from a stored entry (§4), fresh or stale: with a 304 when the
-// client says it already has it (§4.3.2).
+// client says it already has it (§4.3.2). The entry is ready for r (see ready).
 func (c *cache) serve(w http.ResponseWriter, r *http.Request, e *entry, age, lifetime time.Duration, status cacheStatus) {
 	h := w.Header()
 	for name, values := range e.header {
@@ -187,7 +264,7 @@ func (c *cache) serve(w http.ResponseWriter, r *http.Request, e *entry, age, lif
 		return
 	}
 	if bodyAllowed(e.status) {
-		h.Set("Content-Length", strconv.Itoa(len(e.body)))
+		h.Set("Content-Length", strconv.FormatInt(e.size, 10))
 	}
 	w.WriteHeader(e.status)
 	if r.Method != http.MethodHead && bodyAllowed(e.status) {
@@ -197,6 +274,14 @@ func (c *cache) serve(w http.ResponseWriter, r *http.Request, e *entry, age, lif
 
 func bodyAllowed(status int) bool {
 	return status >= 200 && status != http.StatusNoContent && status != http.StatusNotModified
+}
+
+// sendsBody reports whether serve sends the body of e to answer r.
+func sendsBody(r *http.Request, e *entry) bool {
+	if r.Method == http.MethodHead || !bodyAllowed(e.status) {
+		return false
+	}
+	return e.status != http.StatusOK || !notModified(r.Header, e.header, e.responseTime)
 }
 
 // forward proxies the request to the backend and stores the response when
@@ -211,7 +296,8 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 		return
 	}
 
-	m := &missHook{c: c, req: r, status: status, store: mayStore && r.Method == http.MethodGet, requestTime: time.Now(), stored: stored}
+	m := &missHook{c: c, req: r, reqCC: reqCC, key: key, field: field, status: status, requestTime: time.Now(), stored: stored}
+	m.store = mayStore && r.Method == http.MethodGet
 	m.head = mayStore && r.Method == http.MethodHead
 	var before http.Header
 	if stored != nil {
@@ -249,15 +335,13 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 			h[name] = values
 		}
 		e := m.validated
-		cc := parseCacheControl(e.header.Values("Cache-Control"))
-		age := currentAge(e.header, e.requestTime, e.responseTime, time.Now())
 		status.fwdStatus = rec.status
 		status.served = true
-		c.serve(w, r, e, age, freshnessLifetime(e, cc, c.cfg.defaultTTL), status)
+		c.serve(w, r, e, currentAge(e, time.Now()), freshnessLifetime(e, c.cfg.defaultTTL), status)
 		if m.updated {
 			// The client gets the whole response before the Redis writes.
 			flush(w)
-			c.freshen(ctx, r, key, field, e)
+			c.freshen(ctx, r, reqCC, key, field, e)
 		}
 		return
 	}
@@ -270,7 +354,7 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 	}
 	if m.headHeader != nil {
 		rec.Flush()
-		c.freshenWithHead(ctx, r, key, field, stored, m)
+		c.freshenWithHead(ctx, r, reqCC, key, field, stored, m)
 		return
 	}
 	c.save(ctx, rec, m, key)
@@ -284,13 +368,13 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 // is another variant: it says nothing of this one. Neither does a response
 // without validator: some backends answer a HEAD with next to no header, which
 // must not make a stale entry fresh.
-func (c *cache) freshenWithHead(ctx context.Context, r *http.Request, key, field string, stored *entry, m *missHook) {
+func (c *cache) freshenWithHead(ctx context.Context, r *http.Request, reqCC cacheControl, key, field string, stored *entry, m *missHook) {
 	h := m.headHeader
 	if stored == nil {
-		if lookupAllowed(r) {
+		if lookupAllowed(r, reqCC) {
 			return // the cache was read: it has no such response
 		}
-		e, f, _, err := c.find(ctx, key, r.Header)
+		e, f, _, err := c.find(ctx, key, r.Header, false)
 		if err != nil || e == nil {
 			return
 		}
@@ -307,13 +391,11 @@ func (c *cache) freshenWithHead(ctx context.Context, r *http.Request, key, field
 		// Stored again as the response to a GET, which it is.
 		get := r.WithContext(ctx)
 		get.Method = http.MethodGet
-		c.freshen(ctx, get, key, field, refreshed(stored, h, m.requestTime, m.responseTime))
+		c.freshen(ctx, get, reqCC, key, field, refreshed(stored, h, m.requestTime, m.responseTime))
 		return
 	}
-	cc := parseCacheControl(stored.header.Values("Cache-Control"))
-	age := currentAge(stored.header, stored.requestTime, stored.responseTime, m.responseTime)
-	if age < freshnessLifetime(stored, cc, c.cfg.defaultTTL) {
-		_ = c.store.del(ctx, key, field)
+	if currentAge(stored, m.responseTime) < freshnessLifetime(stored, c.cfg.defaultTTL) {
+		c.drop(ctx, key, field)
 	}
 }
 
@@ -328,25 +410,28 @@ func resetHeader(h, before http.Header) {
 }
 
 // freshen stores e, the entry of field as a 304 or the response to a HEAD
-// refreshed it (§4.3.4, §4.3.5), in its field. One that may no longer be
-// stored is deleted instead, unless it is only refused because of the request
-// (see supersedes).
-func (c *cache) freshen(ctx context.Context, req *http.Request, key, field string, e *entry) {
-	ttl, ok := storeTTL(req, e.status, e.header, c.cfg, e.requestTime, e.responseTime)
+// refreshed it (§4.3.4, §4.3.5), in its field: its body stays where it is, for
+// as long. One that may no longer be stored is deleted instead, unless it is
+// only refused because of the request (see supersedes).
+func (c *cache) freshen(ctx context.Context, req *http.Request, reqCC cacheControl, key, field string, e *entry) {
+	cc := parseCacheControl(e.header.Values("Cache-Control"))
+	ttl, ok := storeTTL(req, reqCC, e, cc, c.cfg)
 	if !ok {
-		if supersedes(e.status, e.header, c.cfg, e.requestTime, e.responseTime) {
-			_ = c.store.del(ctx, key, field)
+		if supersedes(e, cc, c.cfg) {
+			c.drop(ctx, key, field)
 		}
 		return
 	}
 	data := encodeEntry(e)
-	if int64(len(data)) > c.maxEntry {
+	if len(data) > entryOverhead {
 		return
 	}
-	if field == "" {
-		_ = c.store.set(ctx, key, "", data, ttl)
-	} else {
-		c.saveVariant(ctx, key, variantOf(req, e, field), data, ttl)
+	v := variant{}
+	if field != "" {
+		v = variantOf(req, e, field)
+	}
+	if c.put(ctx, key, v, []fieldValue{{name: field, value: data}}, ttl) {
+		_ = c.store.expire(ctx, key, bodyField(field), ttl)
 	}
 }
 
@@ -357,52 +442,61 @@ func (c *cache) save(ctx context.Context, rec *recorder, m *missHook, key string
 	if !complete || !m.store {
 		return false
 	}
-	data := encodeEntry(&entry{
-		status:       rec.status,
-		header:       m.header,
-		body:         body,
-		requestTime:  m.requestTime,
-		responseTime: m.responseTime,
-		vary:         m.variant.selected,
-	})
-	if int64(len(data)) > c.maxEntry {
+	e := m.entry
+	e.size = int64(len(body))
+	data := encodeEntry(e)
+	if len(data) > entryOverhead {
 		return false
 	}
 	// The client gets the whole response before the Redis writes.
 	rec.Flush()
-	if m.variant.field == "" {
-		_ = c.store.set(ctx, key, "", data, m.ttl)
-	} else {
-		c.saveVariant(ctx, key, m.variant, data, m.ttl)
-	}
+	field := m.variant.field
+	// The body goes to Redis as the recorder holds it: it is not copied.
+	c.put(ctx, key, m.variant, []fieldValue{{name: field, value: data}, {name: bodyField(field), value: body}}, m.ttl)
 	return true
 }
 
-// saveVariant stores a variant and the marker of its key. Any Redis error ends
-// it: nothing is written to a failing Redis.
-func (c *cache) saveVariant(ctx context.Context, key string, v variant, data []byte, ttl time.Duration) {
+// put stores fields in key: what there is to write of the response that v
+// tells where to store, along with the marker of the key when it is a variant.
+// It reports whether Redis took them. Any Redis error ends it: nothing is
+// written to a failing Redis.
+func (c *cache) put(ctx context.Context, key string, v variant, fields []fieldValue, ttl time.Duration) bool {
+	if v.field == "" {
+		return c.store.set(ctx, key, fields, ttl, false) == nil
+	}
 	mk := marker{names: v.names}
 	if v.coding != "" {
 		// The marker lists the codings stored so far. Reading it and writing it
 		// back is not atomic: a coding lost to a concurrent write is a miss for
 		// the requests it would serve, whose response lists it again.
 		mk.codings = []string{v.coding}
-		raw, err := c.store.get(ctx, key, "")
-		if err != nil && !errors.Is(err, errMiss) {
-			return
+		values, err := c.store.get(ctx, key, []string{""})
+		if err != nil {
+			return false
 		}
-		if old, ok := decodeMarker(raw); ok && sameStrings(old.names, v.names) {
+		if old, ok := decodeMarker(values[0]); ok && sameStrings(old.names, v.names) {
 			mk.codings = v.listed(old.codings)
 		}
 	}
 	n, err := c.store.count(ctx, key)
 	if err != nil {
-		return
+		return false
 	}
-	// A full key (maxVariants and the marker) only gets its variants replaced.
-	// The count is not atomic either: concurrent writes may exceed the limit
-	// by a few fields.
-	_ = c.store.setVariant(ctx, key, v.field, data, encodeMarker(mk), ttl, n > c.cfg.maxVariants)
+	// A full key (the marker and the two fields of each of maxVariants
+	// variants) only gets its variants replaced. The count is not atomic
+	// either: concurrent writes may exceed the limit by a few fields.
+	raw := encodeMarker(mk)
+	fields = append([]fieldValue{{name: "", value: raw}}, fields...)
+	if c.store.set(ctx, key, fields, ttl, n > 2*c.cfg.maxVariants) != nil {
+		return false
+	}
+	c.markers.set(key, knownMarker{raw: string(raw), marker: mk}, true)
+	return true
+}
+
+// drop removes the entry of field from key, with its body.
+func (c *cache) drop(ctx context.Context, key, field string) {
+	_ = c.store.del(ctx, key, []string{field, bodyField(field)})
 }
 
 // missHook decides, when the backend sends its final status, what becomes of
@@ -410,11 +504,14 @@ func (c *cache) saveVariant(ctx context.Context, key string, v variant, data []b
 type missHook struct {
 	c            *cache
 	req          *http.Request
+	reqCC        cacheControl // Cache-Control of req
+	key          string
+	field        string // the one of stored
 	status       cacheStatus
 	store        bool
 	requestTime  time.Time
 	responseTime time.Time
-	header       http.Header // header to store, without our Cache-Status
+	entry        *entry // response to store, without its body nor our Cache-Status
 	ttl          time.Duration
 	variant      variant // where to store it
 
@@ -451,42 +548,51 @@ type missHook struct {
 func (m *missHook) beforeHeader(code int, h http.Header) disposition {
 	m.responseTime = time.Now()
 	if m.validating && code == http.StatusNotModified {
-		current, update := validates(m.stored, h)
-		if !current {
-			// Not the stored response: in the background, it is deleted.
-			m.unusable = true
-			m.superseded = m.revalidation
-			return withhold
+		if current, update := validates(m.stored, h); current {
+			e := m.stored
+			if update {
+				e = refreshed(m.stored, h, m.requestTime, m.responseTime)
+			}
+			// In the background, nobody is answered: the body is not needed.
+			if m.revalidation || m.c.ready(m.req, m.key, m.field, e) {
+				m.own = ownFields(m.stored, h)
+				m.validated = e
+				m.updated = update
+				return withhold
+			}
 		}
-		m.own = ownFields(m.stored, h)
-		m.validated = m.stored
-		if update {
-			m.validated = refreshed(m.stored, h, m.requestTime, m.responseTime)
-			m.updated = true
-		}
+		// Not the stored response, or its body is gone: in the background, it
+		// is deleted.
+		m.unusable = true
+		m.superseded = m.revalidation
 		return withhold
 	}
 	if m.stored != nil && !m.revalidation && staleIfErrorStatus(code) {
 		cc := parseCacheControl(m.stored.header.Values("Cache-Control"))
-		m.age = currentAge(m.stored.header, m.stored.requestTime, m.stored.responseTime, m.responseTime)
-		m.lifetime = freshnessLifetime(m.stored, cc, m.c.cfg.defaultTTL)
-		if servableOnError(code, cc, m.age-m.lifetime, m.c.cfg) {
+		m.age = currentAge(m.stored, m.responseTime)
+		m.lifetime = freshnessLifetime(m.stored, m.c.cfg.defaultTTL)
+		if servableOnError(code, cc, m.age-m.lifetime, m.c.cfg) && m.c.ready(m.req, m.key, m.field, m.stored) {
 			m.staleIfError = true
 			return withhold
 		}
 	}
 	if m.store {
-		ttl, ok := storeTTL(m.req, code, h, m.c.cfg, m.requestTime, m.responseTime)
+		// The Cache-Control of the response is parsed once, for all it decides.
+		cc := parseCacheControl(h.Values("Cache-Control"))
+		e := &entry{status: code, header: h, requestTime: m.requestTime, responseTime: m.responseTime}
+		ttl, ok := storeTTL(m.req, m.reqCC, e, cc, m.c.cfg)
 		m.store = ok
 		if ok {
 			m.ttl = ttl
-			m.header = headerToStore(h)
+			e.header = headerToStore(h, cc)
 			m.variant = newVariant(m.req, h)
+			e.vary = m.variant.selected
+			m.entry = e
 		}
-	}
-	if m.revalidation {
-		// A storable response whose body turns out to be too large supersedes too.
-		m.superseded = m.store || supersedes(code, h, m.c.cfg, m.requestTime, m.responseTime)
+		if m.revalidation {
+			// A storable response whose body turns out to be too large supersedes too.
+			m.superseded = m.store || supersedes(e, cc, m.c.cfg)
+		}
 	}
 	if m.head && code == http.StatusOK {
 		m.headHeader = h.Clone()

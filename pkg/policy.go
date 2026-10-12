@@ -156,6 +156,18 @@ func parseDeltaSeconds(s string) (int64, bool) {
 // splitList splits a field line holding a list (RFC 9110 §5.6.1) on commas
 // outside quoted strings: Cache-Control directives, entity tags.
 func splitList(s string) []string {
+	if strings.IndexByte(s, '"') < 0 {
+		// Nothing is quoted: the standard library splits it, which Yaegi runs
+		// much faster than a loop of ours.
+		items := strings.Split(s, ",")
+		out := items[:0]
+		for _, d := range items {
+			if d = strings.TrimSpace(d); d != "" {
+				out = append(out, d)
+			}
+		}
+		return out
+	}
 	var out []string
 	start, quoted := 0, false
 	for i := 0; i < len(s); i++ {
@@ -217,10 +229,9 @@ func heuristicallyCacheable(status int) bool {
 
 // freshnessLifetime returns the lifetime of a stored entry: explicit freshness,
 // or defaultTtl. Entries only get stored when defaultTtl was allowed for them.
-// cc is the Cache-Control of the entry.
-func freshnessLifetime(e *entry, cc cacheControl, defaultTTL time.Duration) time.Duration {
-	if d, ok := explicitFreshness(e.header, cc, e.responseTime); ok {
-		return d
+func freshnessLifetime(e *entry, defaultTTL time.Duration) time.Duration {
+	if e.lifetime >= 0 {
+		return e.lifetime
 	}
 	if heuristicallyCacheable(e.status) {
 		return defaultTTL
@@ -244,8 +255,28 @@ func dateValue(h http.Header, responseTime time.Time) time.Time {
 	return responseTime
 }
 
-// currentAge implements RFC 9111 §4.2.3.
-func currentAge(h http.Header, requestTime, responseTime, now time.Time) time.Duration {
+// setFreshness sets what the age and the freshness lifetime of e are worked out
+// from, once, rather than on every hit: from its header, its times and its
+// Cache-Control (cc).
+//
+// Like currentAge, it is a function rather than a method of entry: under
+// Yaegi, calling a method costs several times what calling a function does.
+func setFreshness(e *entry, cc cacheControl) {
+	e.initialAge = initialAge(e.header, e.requestTime, e.responseTime)
+	e.lifetime = -1
+	if d, ok := explicitFreshness(e.header, cc, e.responseTime); ok {
+		e.lifetime = d
+	}
+}
+
+// currentAge returns the age of e at the given time (§4.2.3).
+func currentAge(e *entry, now time.Time) time.Duration {
+	return e.initialAge + now.Sub(e.responseTime)
+}
+
+// initialAge returns the corrected initial age of a response (§4.2.3): its age
+// when it was received.
+func initialAge(h http.Header, requestTime, responseTime time.Time) time.Duration {
 	apparentAge := responseTime.Sub(dateValue(h, responseTime))
 	if apparentAge < 0 {
 		apparentAge = 0
@@ -257,21 +288,22 @@ func currentAge(h http.Header, requestTime, responseTime, now time.Time) time.Du
 		ageValue = seconds(n)
 	}
 	correctedAgeValue := ageValue + responseTime.Sub(requestTime)
-	correctedInitialAge := apparentAge
-	if correctedAgeValue > correctedInitialAge {
-		correctedInitialAge = correctedAgeValue
+	if correctedAgeValue > apparentAge {
+		return correctedAgeValue
 	}
-	return correctedInitialAge + now.Sub(responseTime)
+	return apparentAge
 }
 
-// storeTTL decides whether a response may be stored and returns its Redis TTL:
-// remaining freshness + staleTtl. RFC 9111 §3, §3.5 and the shared-cache rules
-// of CLAUDE.md apply; statusCodes only narrows what may be stored.
-func storeTTL(req *http.Request, status int, h http.Header, cfg settings, requestTime, responseTime time.Time) (time.Duration, bool) {
-	if req.Method != http.MethodGet {
-		return 0, false
-	}
-	if parseCacheControl(req.Header.Values("Cache-Control")).noStore {
+// storeTTL decides whether e, the response to req, may be stored and returns
+// its Redis TTL: remaining freshness + staleTtl. RFC 9111 §3, §3.5 and the
+// shared-cache rules of CLAUDE.md apply; statusCodes only narrows what may be
+// stored. reqCC and cc are the Cache-Control of req and of e, which has its
+// status, its header and its times: its freshness is set here (see
+// setFreshness), once the decision comes to depend on it.
+func storeTTL(req *http.Request, reqCC cacheControl, e *entry, cc cacheControl, cfg settings) (time.Duration, bool) {
+	status := e.status
+	h := e.header
+	if req.Method != http.MethodGet || reqCC.noStore {
 		return 0, false
 	}
 	if !slices.Contains(cfg.statusCodes, status) || status < 200 || status == http.StatusPartialContent ||
@@ -279,7 +311,6 @@ func storeTTL(req *http.Request, status int, h http.Header, cfg settings, reques
 		return 0, false
 	}
 
-	cc := parseCacheControl(h.Values("Cache-Control"))
 	if cc.noStore || cc.private {
 		return 0, false
 	}
@@ -312,8 +343,9 @@ func storeTTL(req *http.Request, status int, h http.Header, cfg settings, reques
 		return 0, false
 	}
 
-	lifetime, explicit := explicitFreshness(h, cc, responseTime)
-	if !explicit {
+	setFreshness(e, cc)
+	lifetime := e.lifetime
+	if lifetime < 0 {
 		// defaultTtl is heuristic freshness: never for personalized exchanges.
 		if !heuristicallyCacheable(status) || cfg.defaultTTL <= 0 ||
 			hasAuth || req.Header.Get("Cookie") != "" || hasSetCookie {
@@ -322,7 +354,7 @@ func storeTTL(req *http.Request, status int, h http.Header, cfg settings, reques
 		lifetime = cfg.defaultTTL
 	}
 
-	remaining := lifetime - currentAge(h, requestTime, responseTime, responseTime)
+	remaining := lifetime - e.initialAge
 	if remaining <= 0 {
 		return 0, false
 	}
@@ -330,12 +362,10 @@ func storeTTL(req *http.Request, status int, h http.Header, cfg settings, reques
 }
 
 // lookupAllowed reports whether the request lets the cache answer from storage
-// (§5.2.1.4, §5.4).
-func lookupAllowed(req *http.Request) bool {
-	values := req.Header.Values("Cache-Control")
-	if len(values) > 0 {
+// (§5.2.1.4, §5.4). cc is its Cache-Control.
+func lookupAllowed(req *http.Request, cc cacheControl) bool {
+	if len(req.Header.Values("Cache-Control")) > 0 {
 		// no-cache has no qualified form in a request: an argument is ignored.
-		cc := parseCacheControl(values)
 		return !cc.noCache && len(cc.unstored) == 0
 	}
 	for _, p := range req.Header.Values("Pragma") {
@@ -423,18 +453,19 @@ func staleIfErrorStatus(status int) bool {
 	return false
 }
 
-// supersedes reports whether a response to a background revalidation that is
-// not stored replaces the stored one anyway, which must then be deleted. It
+// supersedes reports whether e, a response to a background revalidation that
+// is not stored, replaces the stored one anyway, which must then be deleted. It
 // does not when the backend is failing or throttling (5xx, 429), nor when the
 // response is only refused because of the Authorization or Cookie of the
 // request that triggered the revalidation: a request without them would get it
-// stored, and clients must not be able to evict entries.
-func supersedes(status int, h http.Header, cfg settings, requestTime, responseTime time.Time) bool {
-	if status >= 500 || status == http.StatusTooManyRequests {
+// stored, and clients must not be able to evict entries. cc is the
+// Cache-Control of e.
+func supersedes(e *entry, cc cacheControl, cfg settings) bool {
+	if e.status >= 500 || e.status == http.StatusTooManyRequests {
 		return false
 	}
 	anonymous := &http.Request{Method: http.MethodGet, Header: http.Header{}}
-	_, ok := storeTTL(anonymous, status, h, cfg, requestTime, responseTime)
+	_, ok := storeTTL(anonymous, parseCacheControl(nil), e, cc, cfg)
 	return !ok
 }
 
@@ -454,11 +485,11 @@ var hopByHop = []string{
 }
 
 // headerToStore copies the response header without hop-by-hop fields and
-// without the fields its Cache-Control forbids to store (§3.1): only the
+// without the fields its Cache-Control (cc) forbids to store (§3.1): only the
 // client that caused the miss gets those.
-func headerToStore(h http.Header) http.Header {
+func headerToStore(h http.Header, cc cacheControl) http.Header {
 	out := endToEnd(h)
-	for _, name := range parseCacheControl(h.Values("Cache-Control")).unstored {
+	for _, name := range cc.unstored {
 		out.Del(name)
 	}
 	return out
