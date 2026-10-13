@@ -33,16 +33,18 @@ type Config struct {
 
 // RedisConfig holds the Redis connection options.
 type RedisConfig struct {
-	DSN     string `json:"dsn,omitempty"`
-	Timeout string `json:"timeout,omitempty"`
+	DSN         string `json:"dsn,omitempty"`
+	DialTimeout string `json:"dialTimeout,omitempty"`
+	Timeout     string `json:"timeout,omitempty"`
 }
 
 // CreateConfig returns the default configuration (documented in the README).
 func CreateConfig() *Config {
 	return &Config{
 		Redis: RedisConfig{
-			DSN:     "redis://cache:6379/0",
-			Timeout: "50ms",
+			DSN:         "redis://cache:6379/0",
+			DialTimeout: "50ms",
+			Timeout:     "1s",
 		},
 		StatusCodes:                 []int{200},
 		DefaultTTL:                  "5m",
@@ -81,7 +83,10 @@ type redisOptions struct {
 	username string
 	password string
 	db       int
-	timeout  time.Duration
+	// dialTimeout bounds getting a connection, a free one of the pool or a new
+	// one; timeout bounds a whole operation, getting its connection included.
+	dialTimeout time.Duration
+	timeout     time.Duration
 }
 
 func parseConfig(cfg *Config) (settings, error) {
@@ -94,11 +99,18 @@ func parseConfig(cfg *Config) (settings, error) {
 	if err != nil {
 		return s, err
 	}
+	if redis.dialTimeout, err = parseDuration("redis.dialTimeout", cfg.Redis.DialTimeout); err != nil {
+		return s, err
+	}
 	if redis.timeout, err = parseDuration("redis.timeout", cfg.Redis.Timeout); err != nil {
 		return s, err
 	}
-	if redis.timeout <= 0 {
-		return s, errors.New("redis.timeout must be positive")
+	if redis.dialTimeout <= 0 || redis.timeout <= 0 {
+		return s, errors.New("redis.dialTimeout and redis.timeout must be positive")
+	}
+	// An operation starts by getting its connection.
+	if redis.dialTimeout > redis.timeout {
+		return s, errors.New("redis.dialTimeout must not exceed redis.timeout")
 	}
 	s.redis = redis
 

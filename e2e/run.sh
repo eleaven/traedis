@@ -23,7 +23,7 @@ hurl() {
 }
 
 # The stack has just started: its first requests may be too slow for
-# `redis.timeout`, which bypasses the cache. Waiting does not help, they have
+# `redis.dialTimeout`, which bypasses the cache. Waiting does not help, they have
 # to be made: warmup.hurl asks until the cache answers.
 echo "# Warm-up"
 hurl /e2e/warmup.hurl

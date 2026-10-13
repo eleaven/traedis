@@ -7,7 +7,8 @@ summary: 'Redis-backed HTTP cache for Traefik'
 testData:
   redis:
     dsn: "redis://localhost:6379/0"
-    timeout: 50ms
+    dialTimeout: 50ms
+    timeout: 1s
   statusCodes: [ 200 ]
   defaultTtl: 5m
   staleTtl: 1h

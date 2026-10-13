@@ -66,7 +66,8 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | Key                           | Default                | Description                                                                                                                                    |
 |-------------------------------|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
 | `redis.dsn`                   | `redis://cache:6379/0` | `redis://[user[:password]@]host[:port][/db]`. TLS (`rediss://`) is not supported yet.                                                          |
-| `redis.timeout`               | `50ms`                 | Maximum time for a Redis operation. Past it, the cache is bypassed.                                                                            |
+| `redis.dialTimeout`           | `50ms`                 | Maximum time to get a connection to Redis: a free one of the pool, or a new one. Past it, the cache is bypassed.                               |
+| `redis.timeout`               | `1s`                   | Maximum time for a whole Redis operation, getting the connection and transferring a body included. Past it, the cache is bypassed.             |
 | `statusCodes`                 | `[200]`                | Status codes allowed to be stored, at least one. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable.         |
 | `defaultTtl`                  | `5m`                   | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires`. `0` disables it.                                                       |
 | `staleTtl`                    | `1h`                   | How long an entry is kept in Redis after it expires: the upper bound of every [stale response](#stale-responses). `0` disables them.           |

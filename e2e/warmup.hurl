@@ -1,4 +1,4 @@
-# The first requests through a Traefik that has just started are sometimes too slow for `redis.timeout`:
+# The first requests through a Traefik that has just started are sometimes too slow for `redis.dialTimeout`:
 # resolving the name of Redis alone can then take more than its 50 ms. The cache is bypassed for them,
 # as it must be, but the tests expect it to answer.
 

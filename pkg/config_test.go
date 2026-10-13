@@ -13,7 +13,7 @@ func TestCreateConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("default config rejected: %v", err)
 	}
-	if s.redis.addr != "cache:6379" || s.redis.db != 0 || s.redis.timeout != 50*time.Millisecond {
+	if s.redis.addr != "cache:6379" || s.redis.db != 0 || s.redis.dialTimeout != 50*time.Millisecond || s.redis.timeout != time.Second {
 		t.Errorf("redis = %+v", s.redis)
 	}
 	if len(s.statusCodes) != 1 || s.statusCodes[0] != 200 {
@@ -39,6 +39,9 @@ func TestParseConfig(t *testing.T) {
 	}{
 		{name: "invalid redis.timeout", mutate: func(c *Config) { c.Redis.Timeout = "fast" }, wantErr: "redis.timeout"},
 		{name: "zero redis.timeout", mutate: func(c *Config) { c.Redis.Timeout = "0" }, wantErr: "redis.timeout"},
+		{name: "invalid redis.dialTimeout", mutate: func(c *Config) { c.Redis.DialTimeout = "fast" }, wantErr: "redis.dialTimeout"},
+		{name: "zero redis.dialTimeout", mutate: func(c *Config) { c.Redis.DialTimeout = "0" }, wantErr: "redis.dialTimeout"},
+		{name: "redis.dialTimeout past redis.timeout", mutate: func(c *Config) { c.Redis.Timeout = "20ms" }, wantErr: "redis.dialTimeout must not exceed redis.timeout"},
 		{name: "invalid defaultTtl", mutate: func(c *Config) { c.DefaultTTL = "5 minutes" }, wantErr: "defaultTtl"},
 		{name: "negative staleTtl", mutate: func(c *Config) { c.StaleTTL = "-1s" }, wantErr: "staleTtl"},
 		{name: "invalid defaultStaleWhileRevalidate", mutate: func(c *Config) { c.DefaultStaleWhileRevalidate = "30" }, wantErr: "defaultStaleWhileRevalidate"},
@@ -148,7 +151,8 @@ func TestParseDSNErrorsDoNotLeakCredentials(t *testing.T) {
 func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg := CreateConfig()
 	cfg.Redis.DSN = "redis://localhost:6379/0"
-	cfg.Redis.Timeout = "50ms"
+	cfg.Redis.DialTimeout = "50ms"
+	cfg.Redis.Timeout = "1s"
 	cfg.StatusCodes = []int{200}
 	cfg.DefaultTTL = "5m"
 	cfg.StaleTTL = "1h"

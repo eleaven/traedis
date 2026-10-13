@@ -66,8 +66,10 @@ func newHandler(b *testing.B, next http.Handler, maxBodyBytes int64) http.Handle
 	}
 	cfg := traedis.CreateConfig()
 	cfg.Redis.DSN = dsn
-	cfg.Redis.Timeout = "5s" // a slow machine must not turn the run into bypasses
-	cfg.StaleTTL = "0s"      // entries are gone as soon as they expire
+	// A slow machine must not turn the run into bypasses.
+	cfg.Redis.DialTimeout = "5s"
+	cfg.Redis.Timeout = "5s"
+	cfg.StaleTTL = "0s" // entries are gone as soon as they expire
 	cfg.MaxBodyBytes = maxBodyBytes
 	h, err := traedis.New(context.Background(), next, cfg, "bench")
 	if err != nil {

@@ -24,8 +24,10 @@ const echoKey = "echo-key"
 // fakeRedis is a scripted RESP server: replies maps a command name to its raw
 // reply (defaultReplies otherwise); an empty reply means never answering.
 type fakeRedis struct {
-	ln       net.Listener
-	replies  map[string]string
+	ln      net.Listener
+	replies map[string]string
+	// delay is how long every reply takes.
+	delay    time.Duration
 	mu       sync.Mutex
 	commands [][]string
 	accepts  int
@@ -100,6 +102,7 @@ func (f *fakeRedis) handle(c net.Conn) {
 		if resp == echoKey {
 			resp = "*1\r\n$" + strconv.Itoa(len(args[1])) + "\r\n" + args[1] + "\r\n"
 		}
+		time.Sleep(f.delay)
 		if _, err := io.WriteString(c, resp); err != nil {
 			return
 		}
@@ -147,7 +150,7 @@ func readCommand(r *bufio.Reader) ([]string, error) {
 }
 
 func testClient(f *fakeRedis) *redisClient {
-	return newRedisClient(redisOptions{addr: f.ln.Addr().String(), timeout: 200 * time.Millisecond}, 1024)
+	return newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}, 1024)
 }
 
 // getField reads one field of key: nil when it is not there.
@@ -352,6 +355,7 @@ func TestRedisDialSendsAuthAndSelect(t *testing.T) {
 			f := newFakeRedis(t, nil)
 			opts := tt.opts
 			opts.addr = f.ln.Addr().String()
+			opts.dialTimeout = 200 * time.Millisecond
 			opts.timeout = 200 * time.Millisecond
 			if _, err := getField(newRedisClient(opts, 1024), "k", ""); err != nil {
 				t.Fatal(err)
@@ -370,7 +374,7 @@ func TestRedisDialSendsAuthAndSelect(t *testing.T) {
 
 func TestRedisAuthFailure(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"AUTH": "-WRONGPASS invalid username-password pair\r\n"})
-	opts := redisOptions{addr: f.ln.Addr().String(), password: "s3cret", timeout: 200 * time.Millisecond}
+	opts := redisOptions{addr: f.ln.Addr().String(), password: "s3cret", dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}
 	_, err := getField(newRedisClient(opts, 1024), "k", "")
 	if err == nil {
 		t.Fatal("expected an error")
@@ -443,7 +447,7 @@ func TestRedisUntrustedReplies(t *testing.T) {
 
 func TestRedisTimeout(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HMGET": ""})
-	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
 	start := time.Now()
 	if _, err := getField(c, "k", ""); err == nil {
 		t.Fatal("expected a timeout")
@@ -453,14 +457,48 @@ func TestRedisTimeout(t *testing.T) {
 	}
 }
 
+// redis.timeout is for the whole operation: a reply may take longer than
+// redis.dialTimeout, which is only for getting the connection.
+func TestRedisSlowReply(t *testing.T) {
+	f := newFakeRedis(t, nil)
+	f.delay = 100 * time.Millisecond
+	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 20 * time.Millisecond, timeout: 5 * time.Second}, 1024)
+	for i := 0; i < 2; i++ { // on a new connection, then on the idle one
+		if v, err := getField(c, "k", ""); err != nil || string(v) != "hello" {
+			t.Fatalf("get() = %q, %v", v, err)
+		}
+	}
+}
+
+// Setting up a new connection is part of getting it.
+func TestRedisDialTimeout(t *testing.T) {
+	f := newFakeRedis(t, map[string]string{"AUTH": ""})
+	opts := redisOptions{addr: f.ln.Addr().String(), password: "p", dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}
+	c := newRedisClient(opts, 1024)
+	start := time.Now()
+	if _, err := getField(c, "k", ""); err == nil {
+		t.Fatal("expected a timeout")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("get() took %v, want about redis.dialTimeout", elapsed)
+	}
+	if len(c.sem) != 0 {
+		t.Errorf("pool tokens leaked: %d", len(c.sem))
+	}
+}
+
 func TestRedisPoolExhausted(t *testing.T) {
 	f := newFakeRedis(t, nil)
-	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}, 1024)
 	for i := 0; i < redisPoolSize; i++ {
 		c.sem <- struct{}{}
 	}
+	start := time.Now()
 	if _, err := getField(c, "k", ""); err == nil {
 		t.Fatal("expected an error when the pool is exhausted")
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("get() took %v, want about redis.dialTimeout", elapsed)
 	}
 	if accepts := f.connections(); accepts != 0 {
 		t.Errorf("connections = %d, want 0", accepts)
@@ -469,7 +507,7 @@ func TestRedisPoolExhausted(t *testing.T) {
 
 func TestRedisPoolWaitsForAConnection(t *testing.T) {
 	f := newFakeRedis(t, nil)
-	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), timeout: 2 * time.Second}, 1024)
+	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 2 * time.Second, timeout: 2 * time.Second}, 1024)
 	for i := 0; i < redisPoolSize; i++ {
 		c.sem <- struct{}{}
 	}
@@ -492,7 +530,7 @@ func TestRedisPoolWaitsForAConnection(t *testing.T) {
 func TestRedisPoolConcurrency(t *testing.T) {
 	const workers, rounds = 32, 100
 	f := newFakeRedis(t, map[string]string{"HMGET": echoKey})
-	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), timeout: 5 * time.Second}, 1024)
+	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 5 * time.Second, timeout: 5 * time.Second}, 1024)
 
 	failures := make(chan string, workers)
 	var wg sync.WaitGroup
@@ -527,7 +565,7 @@ func TestRedisUnreachable(t *testing.T) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 
-	c := newRedisClient(redisOptions{addr: addr, timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient(redisOptions{addr: addr, dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
 	if _, err := getField(c, "k", ""); err == nil {
 		t.Fatal("expected an error")
 	}
@@ -547,6 +585,7 @@ func integrationClient(t *testing.T) *redisClient {
 	if err != nil {
 		t.Fatal(err)
 	}
+	opts.dialTimeout = time.Second
 	opts.timeout = time.Second
 	return newRedisClient(opts, 1<<20)
 }

@@ -49,7 +49,9 @@ type redisError string
 func (e redisError) Error() string { return "redis: " + string(e) }
 
 // redisClient is a minimal RESP2 client with a bounded connection pool.
-// Every operation is bounded by the configured timeout.
+// Every operation is bounded by redis.timeout, and getting its connection by
+// redis.dialTimeout: Redis has more time to send a body than to show it is
+// there.
 //
 // The pool uses no select statement: Yaegi v0.16.1 shares the operands of a
 // select between the goroutines running it, which hands one connection to two
@@ -196,8 +198,8 @@ func (c *redisClient) del(ctx context.Context, key string, fields []string) erro
 	return nil
 }
 
-// do runs one command, within the configured timeout. Any failure but an
-// error reply closes the connection: its state is unknown.
+// do runs one command, within redis.timeout. Any failure but an error reply
+// closes the connection: its state is unknown.
 //
 // Like acquire, release and roundTrip, which run for every command too, it is
 // a function rather than a method of the client: under Yaegi, calling a method
@@ -229,12 +231,19 @@ func do(ctx context.Context, c *redisClient, args [][]byte) (reply, error) {
 	return r, nil
 }
 
-// acquire waits for a pool token, until ctx is done, then returns an idle
-// connection or dials a new one.
+// acquire returns an idle connection or dials a new one, once it has a pool
+// token. Waiting for the token and dialing are given redis.dialTimeout, which
+// a free token and an idle connection, the usual case, never need.
 func acquire(ctx context.Context, c *redisClient) (*redisConn, error) {
-	// select { case c.sem <- struct{}{}: default: }: most of the time, a token
-	// is free.
+	// select { case c.sem <- struct{}{}: default: }
 	chosen, _, _ := reflect.Select(c.takeToken)
+	if chosen == 0 {
+		if conn := idleConn(c); conn != nil {
+			return conn, nil
+		}
+	}
+	ctx, cancel := context.WithTimeout(ctx, c.opts.dialTimeout)
+	defer cancel()
 	if chosen != 0 {
 		// select { case c.sem <- struct{}{}: case <-ctx.Done(): }
 		chosen, _, _ = reflect.Select([]reflect.SelectCase{
@@ -244,17 +253,9 @@ func acquire(ctx context.Context, c *redisClient) (*redisConn, error) {
 		if chosen != 0 {
 			return nil, fmt.Errorf("redis: pool exhausted: %w", ctx.Err())
 		}
-	}
-
-	var conn *redisConn
-	c.idleMu.Lock()
-	if n := len(c.idle); n > 0 {
-		conn = c.idle[n-1]
-		c.idle = c.idle[:n-1]
-	}
-	c.idleMu.Unlock()
-	if conn != nil {
-		return conn, nil
+		if conn := idleConn(c); conn != nil {
+			return conn, nil
+		}
 	}
 
 	conn, err := c.dial(ctx)
@@ -263,6 +264,18 @@ func acquire(ctx context.Context, c *redisClient) (*redisConn, error) {
 		return nil, err
 	}
 	return conn, nil
+}
+
+// idleConn takes the idle connection used last out of the pool, if there is one.
+func idleConn(c *redisClient) *redisConn {
+	var conn *redisConn
+	c.idleMu.Lock()
+	if n := len(c.idle); n > 0 {
+		conn = c.idle[n-1]
+		c.idle = c.idle[:n-1]
+	}
+	c.idleMu.Unlock()
+	return conn
 }
 
 // release returns a healthy connection to the pool (nil for a closed one).
@@ -275,6 +288,8 @@ func release(c *redisClient, conn *redisConn) {
 	<-c.sem
 }
 
+// dial opens a connection and sets it up (AUTH, SELECT), until the deadline of
+// ctx.
 func (c *redisClient) dial(ctx context.Context) (*redisConn, error) {
 	var d net.Dialer
 	nc, err := d.DialContext(ctx, "tcp", c.opts.addr)
