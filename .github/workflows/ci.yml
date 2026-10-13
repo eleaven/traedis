@@ -71,7 +71,7 @@ jobs:
       - run: go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1
       - run: docker compose up -d --wait --wait-timeout 120 ingress cache whoami placeholder imaging
       - run: ./benchmark/run.sh
-      # Not on failure: results.json would still be the committed one, not this run's
+      # Not on failure: there is no results.json then
       - name: Report
         run: node benchmark/summary.mjs >> "$GITHUB_STEP_SUMMARY"
       - name: Logs

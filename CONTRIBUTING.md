@@ -40,10 +40,10 @@ make help        # list all targets
 - **Never break a response.** Nothing is buffered past `maxBodyBytes`, and streaming (`Flush`), WebSockets (`Hijack`) and trailers keep
   working.
 - **Clients are not trusted, neither is what Redis returns.** Clients must not be able to multiply entries without bound, nor to evict
-  stored ones other than by [invalidation](README.md#invalidation), and nothing is allocated from a length that was not checked.
+  stored ones other than by [invalidation](README.md#invalidation-by-unsafe-methods), and nothing is allocated from a length that was not checked.
 - **Stored formats are stable.** Changing the Redis key invalidates the whole cache; changing the encoding of an entry or of a `Vary` marker
   bumps its version prefix.
-- **The README is the specification.** A change of behaviour updates its "How it works" or "Security" section. An option is declared in
+- **The README is the specification.** A change of behaviour updates its "Caching rules" or "Security" section. An option is declared in
   `pkg/config.go`, in the README table and in the `testData` of `.traefik.yml`.
 - **Every bug fix comes with a regression test**, and what is visible through Traefik with an end-to-end one. The files of `e2e/tests/` run
   in parallel: each one only requests URLs that its own `{{newUuid}}` makes unique.

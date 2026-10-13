@@ -204,7 +204,7 @@ func TestRecorderPassesInformationalResponses(t *testing.T) {
 }
 
 // Under Yaegi v0.16.1, compiled code cannot see Flush on an interpreted
-// ResponseWriter (see CLAUDE.md); the method still flushes the compiled writer
+// ResponseWriter (see recorder); the method still flushes the compiled writer
 // it wraps.
 func TestRecorderPreservesFlusher(t *testing.T) {
 	rw := httptest.NewRecorder()

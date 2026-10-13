@@ -302,7 +302,7 @@ func initialAge(h http.Header, requestTime, responseTime time.Time) time.Duratio
 
 // storeTTL decides whether e, the response to req, may be stored and returns
 // its Redis TTL: remaining freshness + staleTtl. RFC 9111 §3, §3.5 and the
-// shared-cache rules of CLAUDE.md apply; statusCodes only narrows what may be
+// shared-cache rules of the README apply; statusCodes only narrows what may be
 // stored. reqCC and cc are the Cache-Control of req and of e, which has its
 // status, its header and its times: its freshness is set here (see
 // setFreshness), once the decision comes to depend on it.
