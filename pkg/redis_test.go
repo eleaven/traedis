@@ -194,7 +194,7 @@ func readCommand(r *bufio.Reader) ([]string, error) {
 }
 
 func testClient(f *fakeRedis) *redisClient {
-	return newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}, 1024)
+	return newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}, 1024)
 }
 
 // getField reads one field of key: nil when it is not there.
@@ -402,7 +402,7 @@ func TestRedisDialSendsAuthAndSelect(t *testing.T) {
 			opts.poolSize = 10
 			opts.dialTimeout = 200 * time.Millisecond
 			opts.timeout = 200 * time.Millisecond
-			if _, err := getField(newRedisClient(opts, 1024), "k", ""); err != nil {
+			if _, err := getField(newRedisClient("cache@file", opts, 1024), "k", ""); err != nil {
 				t.Fatal(err)
 			}
 			cmds := f.received()
@@ -433,7 +433,7 @@ func tlsClient(t *testing.T, f *fakeRedis, scheme, host string, tlsConfig RedisT
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newRedisClient(s.redis, 1024)
+	return newRedisClient("cache@file", s.redis, 1024)
 }
 
 func TestRedisTLS(t *testing.T) {
@@ -508,7 +508,7 @@ func TestRedisTLSToPlainRedis(t *testing.T) {
 func TestRedisAuthFailure(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"AUTH": "-WRONGPASS invalid username-password pair\r\n"})
 	opts := redisOptions{poolSize: 10, addr: f.ln.Addr().String(), password: "s3cret", dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}
-	_, err := getField(newRedisClient(opts, 1024), "k", "")
+	_, err := getField(newRedisClient("cache@file", opts, 1024), "k", "")
 	if err == nil {
 		t.Fatal("expected an error")
 	}
@@ -580,7 +580,7 @@ func TestRedisUntrustedReplies(t *testing.T) {
 
 func TestRedisTimeout(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HMGET": ""})
-	c := newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
 	start := time.Now()
 	if _, err := getField(c, "k", ""); err == nil {
 		t.Fatal("expected a timeout")
@@ -595,7 +595,7 @@ func TestRedisTimeout(t *testing.T) {
 func TestRedisSlowReply(t *testing.T) {
 	f := newFakeRedis(t, nil)
 	f.delay = 100 * time.Millisecond
-	c := newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 20 * time.Millisecond, timeout: 5 * time.Second}, 1024)
+	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 20 * time.Millisecond, timeout: 5 * time.Second}, 1024)
 	for i := 0; i < 2; i++ { // on a new connection, then on the idle one
 		if v, err := getField(c, "k", ""); err != nil || string(v) != "hello" {
 			t.Fatalf("get() = %q, %v", v, err)
@@ -607,7 +607,7 @@ func TestRedisSlowReply(t *testing.T) {
 func TestRedisDialTimeout(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"AUTH": ""})
 	opts := redisOptions{poolSize: 10, addr: f.ln.Addr().String(), password: "p", dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}
-	c := newRedisClient(opts, 1024)
+	c := newRedisClient("cache@file", opts, 1024)
 	start := time.Now()
 	if _, err := getField(c, "k", ""); err == nil {
 		t.Fatal("expected a timeout")
@@ -665,7 +665,7 @@ func TestRedisRetryFails(t *testing.T) {
 // A reply that does not come in time is not waited for twice.
 func TestRedisTimeoutIsNotRetried(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HLEN": ""})
-	c := newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
 	if _, err := getField(c, "k", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -679,7 +679,7 @@ func TestRedisTimeoutIsNotRetried(t *testing.T) {
 
 // breakerClient gives up on Redis after 3 failures, for 100 ms.
 func breakerClient(f *fakeRedis) *redisClient {
-	return newRedisClient(redisOptions{
+	return newRedisClient("cache@file", redisOptions{
 		poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond,
 		maxFailures: 3, retryAfter: 100 * time.Millisecond,
 	}, 1024)
@@ -761,6 +761,62 @@ func TestRedisBreakerTriesOneCommand(t *testing.T) {
 	}
 }
 
+// lockedBuffer is a log that several goroutines write to.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf strings.Builder
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) lines() []string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return strings.Split(strings.TrimSuffix(b.buf.String(), "\n"), "\n")
+}
+
+// The log tells which middleware lost its Redis, when it is given up on and
+// when it is back: once each, whatever the number of requests.
+func TestRedisLog(t *testing.T) {
+	f := newFakeRedis(t, map[string]string{"HMGET": "?broken\r\n"})
+	c := breakerClient(f)
+	c.opts.password = "s3cret"
+	log := &lockedBuffer{}
+	c.out = log
+	for i := 0; i < 10; i++ {
+		_, _ = getField(c, "k", "")
+	}
+	f.reply("HMGET", defaultReplies["HMGET"])
+	time.Sleep(120 * time.Millisecond)
+	for i := 0; i < 3; i++ {
+		if _, err := getField(c, "k", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	lines := log.lines()
+	want := []string{
+		"traedis: cache@file: redis error, bypassing the cache (1 errors since last report): redis: protocol error",
+		"traedis: cache@file: redis: no answer to 3 commands in a row: the cache is bypassed, and Redis tried again every 100ms: redis: protocol error",
+		"traedis: cache@file: redis: answers again after ",
+	}
+	if len(lines) != len(want) {
+		t.Fatalf("log = %q", lines)
+	}
+	for i, w := range want {
+		if !strings.HasPrefix(lines[i], w) {
+			t.Errorf("line %d = %q, want %q…", i, lines[i], w)
+		}
+		if strings.Contains(lines[i], "s3cret") {
+			t.Errorf("line %d leaks the password: %q", i, lines[i])
+		}
+	}
+}
+
 // Only failures in a row count, and only those of Redis: an error reply and a
 // value that is too large are answers, a full pool says nothing of it.
 func TestRedisBreakerStaysClosed(t *testing.T) {
@@ -808,7 +864,7 @@ func TestRedisBreakerDisabled(t *testing.T) {
 
 func TestRedisPoolExhausted(t *testing.T) {
 	f := newFakeRedis(t, nil)
-	c := newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}, 1024)
+	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}, 1024)
 	for i := 0; i < cap(c.sem); i++ {
 		c.sem <- struct{}{}
 	}
@@ -826,7 +882,7 @@ func TestRedisPoolExhausted(t *testing.T) {
 
 func TestRedisPoolWaitsForAConnection(t *testing.T) {
 	f := newFakeRedis(t, nil)
-	c := newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 2 * time.Second, timeout: 2 * time.Second}, 1024)
+	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 2 * time.Second, timeout: 2 * time.Second}, 1024)
 	for i := 0; i < cap(c.sem); i++ {
 		c.sem <- struct{}{}
 	}
@@ -849,7 +905,7 @@ func TestRedisPoolWaitsForAConnection(t *testing.T) {
 func TestRedisPoolConcurrency(t *testing.T) {
 	const workers, rounds = 32, 100
 	f := newFakeRedis(t, map[string]string{"HMGET": echoKey})
-	c := newRedisClient(redisOptions{poolSize: 4, addr: f.ln.Addr().String(), dialTimeout: 5 * time.Second, timeout: 5 * time.Second}, 1024)
+	c := newRedisClient("cache@file", redisOptions{poolSize: 4, addr: f.ln.Addr().String(), dialTimeout: 5 * time.Second, timeout: 5 * time.Second}, 1024)
 
 	failures := make(chan string, workers)
 	var wg sync.WaitGroup
@@ -884,7 +940,7 @@ func TestRedisUnreachable(t *testing.T) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 
-	c := newRedisClient(redisOptions{poolSize: 10, addr: addr, dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: addr, dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
 	if _, err := getField(c, "k", ""); err == nil {
 		t.Fatal("expected an error")
 	}
@@ -907,7 +963,7 @@ func integrationClient(t *testing.T) *redisClient {
 	opts.poolSize = 10
 	opts.dialTimeout = time.Second
 	opts.timeout = time.Second
-	return newRedisClient(opts, 1<<20)
+	return newRedisClient("cache@file", opts, 1<<20)
 }
 
 func testKey(t *testing.T) string {
@@ -963,7 +1019,7 @@ func TestRedisIntegrationEntryAndBody(t *testing.T) {
 	}
 
 	// A value larger than what the client accepts is not one of ours: a miss.
-	small := newRedisClient(c.opts, 1024)
+	small := newRedisClient("cache@file", c.opts, 1024)
 	if values, err := small.get(ctx, key, []string{"f1", "f1:body"}); err != nil || values[0] != nil || values[1] != nil {
 		t.Errorf("get() of an oversized value = %q, %v, want no value", values, err)
 	}

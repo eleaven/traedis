@@ -61,6 +61,10 @@ func (e redisError) Error() string { return "redis: " + string(e) }
 // select between the goroutines running it, which hands one connection to two
 // requests.
 type redisClient struct {
+	// name is the one of the middleware, which the log lines start with; out
+	// is where they go.
+	name    string
+	out     io.Writer
 	opts    redisOptions
 	maxBulk int64
 	sem     chan struct{} // one token per connection in use
@@ -98,9 +102,11 @@ type reply struct {
 	items [][]byte
 }
 
-func newRedisClient(opts redisOptions, maxBulk int64) *redisClient {
+func newRedisClient(name string, opts redisOptions, maxBulk int64) *redisClient {
 	sem := make(chan struct{}, opts.poolSize)
 	return &redisClient{
+		name:    name,
+		out:     os.Stderr,
 		opts:    opts,
 		maxBulk: maxBulk,
 		sem:     sem,
@@ -298,7 +304,8 @@ func (c *redisClient) failed(err error) {
 	c.failures++
 	if c.failures == c.opts.maxFailures {
 		c.downSince = now
-		logf("redis: no answer to %d commands in a row: the cache is bypassed, and Redis tried again every %v: %v", c.failures, c.opts.retryAfter, err)
+		logf(c.out, c.name, "redis: no answer to %d commands in a row: the cache is bypassed, and Redis tried again every %v: %v",
+			c.failures, c.opts.retryAfter, err)
 	}
 }
 
@@ -307,7 +314,7 @@ func (c *redisClient) answered() {
 	c.stateMu.Lock()
 	defer c.stateMu.Unlock()
 	if c.opts.maxFailures > 0 && c.failures >= c.opts.maxFailures {
-		logf("redis: answers again after %v: the cache is back", time.Since(c.downSince).Round(time.Millisecond))
+		logf(c.out, c.name, "redis: answers again after %v: the cache is back", time.Since(c.downSince).Round(time.Millisecond))
 	}
 	c.failures = 0
 }
@@ -568,12 +575,13 @@ func (c *redisClient) logError(err error) {
 	if now.Sub(c.lastLog) < logInterval {
 		return
 	}
-	logf("redis error, bypassing the cache (%d errors since last report): %v", c.logCount, err)
+	logf(c.out, c.name, "redis error, bypassing the cache (%d errors since last report): %v", c.logCount, err)
 	c.lastLog = now
 	c.logCount = 0
 }
 
-// logf writes a line to the log of Traefik.
-func logf(format string, args ...any) {
-	_, _ = fmt.Fprintf(os.Stderr, "traedis: "+format+"\n", args...)
+// logf writes a line to out, the log of Traefik: it starts with the name of
+// the middleware, which tells its Redis and its routers from the others.
+func logf(out io.Writer, name, format string, args ...any) {
+	_, _ = fmt.Fprintf(out, "traedis: "+name+": "+format+"\n", args...)
 }

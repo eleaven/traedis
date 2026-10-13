@@ -2,7 +2,6 @@ package traedis
 
 import (
 	"context"
-	"fmt"
 	"net/http"
 	"os"
 	"time"
@@ -78,7 +77,7 @@ func (c *cache) refresh(req *http.Request, key, field string, e *entry) {
 // the backend in a goroutine of ours: it must not take Traefik down.
 func (c *cache) revalidated(key string) {
 	if p := recover(); p != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "traedis: panic during a background revalidation: %v\n", p)
+		logf(os.Stderr, c.name, "panic during a background revalidation: %v", p)
 	}
 	c.revalMu.Lock()
 	delete(c.revalidating, key)

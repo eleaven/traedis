@@ -18,7 +18,7 @@ const entryOverhead = 1 << 20
 type cache struct {
 	next http.Handler
 	// name is the one Traefik gives the middleware ("cache@file"): part of its
-	// Redis keys (see redisKey).
+	// Redis keys (see redisKey) and of its log lines.
 	name    string
 	cfg     settings
 	store   store
@@ -36,7 +36,7 @@ func New(_ context.Context, next http.Handler, config *Config, name string) (htt
 		return nil, err
 	}
 	// No value of ours is larger than a body and an entry.
-	return newCache(next, name, cfg, newRedisClient(cfg.redis, cfg.maxBodyBytes+entryOverhead)), nil
+	return newCache(next, name, cfg, newRedisClient(name, cfg.redis, cfg.maxBodyBytes+entryOverhead)), nil
 }
 
 func newCache(next http.Handler, name string, cfg settings, s store) *cache {

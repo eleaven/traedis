@@ -277,7 +277,8 @@ The cache never fails a request because of Redis: what Redis cannot answer in ti
 - A connection that was closed while it was idle (Redis restarted, a firewall dropped it) is replaced without a bypass.
 - After `redis.maxFailures` failures in a row, Redis is no longer asked: requests are forwarded at once, instead of each one waiting for a
   timeout. One of them tries Redis again every `redis.retryAfter`, and the cache is back as soon as it answers.
-- Traefik logs the failures, at most once a minute, and when Redis is given up on and back.
+- The log of Traefik tells it, in lines that start with `traedis: <middleware>:`: the failures, at most once a minute, then when Redis
+  is given up on and when it is back.
 
 ## Security
 
