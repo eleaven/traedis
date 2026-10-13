@@ -73,6 +73,9 @@ type redisClient struct {
 type redisConn struct {
 	nc net.Conn
 	r  *bufio.Reader
+	// reused is set once the connection has been through the pool: it may have
+	// been closed since, by Redis or on the way to it.
+	reused bool
 }
 
 type reply struct {
@@ -199,7 +202,8 @@ func (c *redisClient) del(ctx context.Context, key string, fields []string) erro
 }
 
 // do runs one command, within redis.timeout. Any failure but an error reply
-// closes the connection: its state is unknown.
+// closes the connection: its state is unknown. A command that fails on a
+// connection of the pool is run once more, on a new one (see stale).
 //
 // Like acquire, release and roundTrip, which run for every command too, it is
 // a function rather than a method of the client: under Yaegi, calling a method
@@ -214,6 +218,18 @@ func do(ctx context.Context, c *redisClient, args [][]byte) (reply, error) {
 		return reply{}, err
 	}
 	r, err := roundTrip(ctx, conn, c.maxBulk, args)
+	if err != nil && conn.reused && stale(err) {
+		_ = conn.nc.Close()
+		dialCtx, cancelDial := context.WithTimeout(ctx, c.opts.dialTimeout)
+		conn, err = c.dial(dialCtx)
+		cancelDial()
+		if err != nil {
+			release(c, nil)
+			c.logError(err)
+			return reply{}, err
+		}
+		r, err = roundTrip(ctx, conn, c.maxBulk, args)
+	}
 	if err != nil {
 		release(c, nil)
 		_ = conn.nc.Close()
@@ -229,6 +245,15 @@ func do(ctx context.Context, c *redisClient, args [][]byte) (reply, error) {
 		return reply{}, err
 	}
 	return r, nil
+}
+
+// stale reports whether err, the failure of a command on a connection of the
+// pool, may only mean that the connection was closed while it was idle (Redis
+// restarted, a firewall dropped it): the command is then worth running again
+// on a new one, which all of ours can be. Not when Redis answered, whatever it
+// said, nor when it did not in time: there is none left.
+func stale(err error) bool {
+	return !errors.Is(err, errTooLarge) && !errors.Is(err, errProtocol) && !errors.Is(err, os.ErrDeadlineExceeded)
 }
 
 // acquire returns an idle connection or dials a new one, once it has a pool
@@ -281,6 +306,7 @@ func idleConn(c *redisClient) *redisConn {
 // release returns a healthy connection to the pool (nil for a closed one).
 func release(c *redisClient, conn *redisConn) {
 	if conn != nil {
+		conn.reused = true
 		c.idleMu.Lock()
 		c.idle = append(c.idle, conn)
 		c.idleMu.Unlock()

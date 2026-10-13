@@ -109,6 +109,16 @@ func (f *fakeRedis) handle(c net.Conn) {
 	}
 }
 
+// drop closes the connections of the clients, as a Redis that restarts does.
+func (f *fakeRedis) drop() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, c := range f.conns {
+		_ = c.Close()
+	}
+	f.conns = nil
+}
+
 func (f *fakeRedis) connections() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -484,6 +494,63 @@ func TestRedisDialTimeout(t *testing.T) {
 	}
 	if len(c.sem) != 0 {
 		t.Errorf("pool tokens leaked: %d", len(c.sem))
+	}
+}
+
+// A connection of the pool that was closed while idle does not cost a bypass:
+// the command is run again on a new one.
+func TestRedisRetriesOnAStaleConnection(t *testing.T) {
+	f := newFakeRedis(t, nil)
+	c := testClient(f)
+	ctx := context.Background()
+	if _, err := getField(c, "k", ""); err != nil {
+		t.Fatal(err)
+	}
+	f.drop()
+	if v, err := getField(c, "k", ""); err != nil || string(v) != "hello" {
+		t.Fatalf("get() on a closed connection = %q, %v, want the value", v, err)
+	}
+	f.drop()
+	if err := c.set(ctx, "k", fieldValues("", "v"), time.Second, false); err != nil {
+		t.Fatalf("set() on a closed connection = %v", err)
+	}
+	if accepts := f.connections(); accepts != 3 {
+		t.Errorf("connections = %d, want 3", accepts)
+	}
+	if len(c.sem) != 0 || len(c.idle) != 1 {
+		t.Errorf("pool: %d tokens taken, %d idle connections, want 0 and 1", len(c.sem), len(c.idle))
+	}
+}
+
+// Only once, and not when Redis is gone: the cache is bypassed.
+func TestRedisRetryFails(t *testing.T) {
+	f := newFakeRedis(t, nil)
+	c := testClient(f)
+	if _, err := getField(c, "k", ""); err != nil {
+		t.Fatal(err)
+	}
+	_ = f.ln.Close()
+	f.drop()
+	if _, err := getField(c, "k", ""); err == nil {
+		t.Fatal("expected an error")
+	}
+	if len(c.sem) != 0 || len(c.idle) != 0 {
+		t.Errorf("pool: %d tokens taken, %d idle connections, want none", len(c.sem), len(c.idle))
+	}
+}
+
+// A reply that does not come in time is not waited for twice.
+func TestRedisTimeoutIsNotRetried(t *testing.T) {
+	f := newFakeRedis(t, map[string]string{"HLEN": ""})
+	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
+	if _, err := getField(c, "k", ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.count(context.Background(), "k"); err == nil {
+		t.Fatal("expected a timeout")
+	}
+	if accepts := f.connections(); accepts != 1 {
+		t.Errorf("connections = %d, want 1", accepts)
 	}
 }
 
