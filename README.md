@@ -348,9 +348,9 @@ Load test through Traefik with 10 concurrent clients, as requests per second and
 
 | Backend | Without cache | Cache miss | Cache hit | Gain |
 | --- | --: | --: | --: | --: |
-| [Text answered after 100 ms][whoami] | 98.1 req/s · 102 ms | 98.0 req/s · 102 ms | 4,182 req/s · 1.73 ms | **×43** |
-| [Rendered PNG][placeholder] | 77.3 req/s · 124 ms | 81.8 req/s · 115 ms | 3,900 req/s · 1.84 ms | **×50** |
-| [Image converted to AVIF][imaging] | 64.1 req/s · 143 ms | 57.9 req/s · 161 ms | 4,009 req/s · 1.79 ms | **×62** |
+| [Text answered after 100 ms][whoami] | 98.1 req/s – 102 ms | 98.0 req/s – 102 ms | 4,182 req/s – 1.73 ms | **×43** |
+| [Rendered PNG][placeholder] | 77.3 req/s – 124 ms | 81.8 req/s – 115 ms | 3,900 req/s – 1.84 ms | **×50** |
+| [Image converted to AVIF][imaging] | 64.1 req/s – 143 ms | 57.9 req/s – 161 ms | 4,009 req/s – 1.79 ms | **×62** |
 
 These figures come from the [CI run of October 12, 2026][bench-run], on a shared GitHub Actions runner: read them as orders of magnitude.
 Every [CI][ci] run publishes its own in its summary, with the p95 and the cost of the middleware alone. `make bench` runs them locally.
