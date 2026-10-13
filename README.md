@@ -1,14 +1,16 @@
 > [!WARNING]
 > **This project is in its early stages.** Use it at your own risk.
 
+<!-- The Traefik Plugin Catalog shows this file on another site: the links of its images are absolute, and not to github.com, which it
+     rewrites to raw.githubusercontent.com -->
 <!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
-  <img src="assets/icon.svg" alt="Traedis Logo" height="360">
+  <img src="https://raw.githubusercontent.com/eleaven/traedis/main/assets/icon.svg" alt="Traedis Logo" height="360">
 </p>
 
 # Traedis
 
-[![CI](https://github.com/eleaven/traedis/actions/workflows/ci.yml/badge.svg)][ci]
+[![CI](https://img.shields.io/github/actions/workflow/status/eleaven/traedis/ci.yml?branch=main&label=CI)][ci]
 
 **Redis**-backed HTTP cache for **Traefik**, shipped as a **middleware plugin**.
 
