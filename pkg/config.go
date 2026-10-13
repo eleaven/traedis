@@ -36,6 +36,8 @@ type RedisConfig struct {
 	DSN         string `json:"dsn,omitempty"`
 	DialTimeout string `json:"dialTimeout,omitempty"`
 	Timeout     string `json:"timeout,omitempty"`
+	MaxFailures int    `json:"maxFailures,omitempty"`
+	RetryAfter  string `json:"retryAfter,omitempty"`
 }
 
 // CreateConfig returns the default configuration (documented in the README).
@@ -45,6 +47,8 @@ func CreateConfig() *Config {
 			DSN:         "redis://cache:6379/0",
 			DialTimeout: "50ms",
 			Timeout:     "1s",
+			MaxFailures: 5,
+			RetryAfter:  "1s",
 		},
 		StatusCodes:                 []int{200},
 		DefaultTTL:                  "5m",
@@ -87,6 +91,10 @@ type redisOptions struct {
 	// one; timeout bounds a whole operation, getting its connection included.
 	dialTimeout time.Duration
 	timeout     time.Duration
+	// After maxFailures failures in a row, Redis is only tried again every
+	// retryAfter (see do). 0: it is tried by every command.
+	maxFailures int
+	retryAfter  time.Duration
 }
 
 func parseConfig(cfg *Config) (settings, error) {
@@ -111,6 +119,16 @@ func parseConfig(cfg *Config) (settings, error) {
 	// An operation starts by getting its connection.
 	if redis.dialTimeout > redis.timeout {
 		return s, errors.New("redis.dialTimeout must not exceed redis.timeout")
+	}
+	if cfg.Redis.MaxFailures < 0 {
+		return s, errors.New("redis.maxFailures must not be negative")
+	}
+	redis.maxFailures = cfg.Redis.MaxFailures
+	if redis.retryAfter, err = parseDuration("redis.retryAfter", cfg.Redis.RetryAfter); err != nil {
+		return s, err
+	}
+	if redis.retryAfter <= 0 {
+		return s, errors.New("redis.retryAfter must be positive")
 	}
 	s.redis = redis
 

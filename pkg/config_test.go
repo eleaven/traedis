@@ -13,7 +13,8 @@ func TestCreateConfigDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("default config rejected: %v", err)
 	}
-	if s.redis.addr != "cache:6379" || s.redis.db != 0 || s.redis.dialTimeout != 50*time.Millisecond || s.redis.timeout != time.Second {
+	if s.redis.addr != "cache:6379" || s.redis.db != 0 || s.redis.dialTimeout != 50*time.Millisecond || s.redis.timeout != time.Second ||
+		s.redis.maxFailures != 5 || s.redis.retryAfter != time.Second {
 		t.Errorf("redis = %+v", s.redis)
 	}
 	if len(s.statusCodes) != 1 || s.statusCodes[0] != 200 {
@@ -42,6 +43,18 @@ func TestParseConfig(t *testing.T) {
 		{name: "invalid redis.dialTimeout", mutate: func(c *Config) { c.Redis.DialTimeout = "fast" }, wantErr: "redis.dialTimeout"},
 		{name: "zero redis.dialTimeout", mutate: func(c *Config) { c.Redis.DialTimeout = "0" }, wantErr: "redis.dialTimeout"},
 		{name: "redis.dialTimeout past redis.timeout", mutate: func(c *Config) { c.Redis.Timeout = "20ms" }, wantErr: "redis.dialTimeout must not exceed redis.timeout"},
+		{name: "negative redis.maxFailures", mutate: func(c *Config) { c.Redis.MaxFailures = -1 }, wantErr: "redis.maxFailures"},
+		{
+			name:   "redis.maxFailures 0 never gives up on Redis",
+			mutate: func(c *Config) { c.Redis.MaxFailures = 0 },
+			check: func(t *testing.T, s settings) {
+				if s.redis.maxFailures != 0 {
+					t.Errorf("maxFailures = %d", s.redis.maxFailures)
+				}
+			},
+		},
+		{name: "invalid redis.retryAfter", mutate: func(c *Config) { c.Redis.RetryAfter = "soon" }, wantErr: "redis.retryAfter"},
+		{name: "zero redis.retryAfter", mutate: func(c *Config) { c.Redis.RetryAfter = "0" }, wantErr: "redis.retryAfter"},
 		{name: "invalid defaultTtl", mutate: func(c *Config) { c.DefaultTTL = "5 minutes" }, wantErr: "defaultTtl"},
 		{name: "negative staleTtl", mutate: func(c *Config) { c.StaleTTL = "-1s" }, wantErr: "staleTtl"},
 		{name: "invalid defaultStaleWhileRevalidate", mutate: func(c *Config) { c.DefaultStaleWhileRevalidate = "30" }, wantErr: "defaultStaleWhileRevalidate"},
@@ -153,6 +166,8 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.Redis.DSN = "redis://localhost:6379/0"
 	cfg.Redis.DialTimeout = "50ms"
 	cfg.Redis.Timeout = "1s"
+	cfg.Redis.MaxFailures = 5
+	cfg.Redis.RetryAfter = "1s"
 	cfg.StatusCodes = []int{200}
 	cfg.DefaultTTL = "5m"
 	cfg.StaleTTL = "1h"

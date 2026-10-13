@@ -39,8 +39,11 @@ const (
 )
 
 var (
-	errProtocol = errors.New("redis: protocol error")
-	errTooLarge = errors.New("redis: value too large")
+	errProtocol      = errors.New("redis: protocol error")
+	errTooLarge      = errors.New("redis: value too large")
+	errPoolExhausted = errors.New("redis: pool exhausted")
+	// errUnavailable fails the commands that are not sent (see do).
+	errUnavailable = errors.New("redis: unavailable")
 )
 
 // redisError is an error reply sent by the server.
@@ -65,6 +68,13 @@ type redisClient struct {
 	takeToken []reflect.SelectCase
 	idleMu    sync.Mutex
 	idle      []*redisConn // at most redisPoolSize: only token holders add to it
+	// The breaker (see do): failures counts the commands that failed in a row,
+	// up to redis.maxFailures; from there, retryAt is when the next command
+	// may be sent, and downSince when it was reached.
+	stateMu   sync.Mutex
+	failures  int
+	retryAt   time.Time
+	downSince time.Time
 	logMu     sync.Mutex
 	lastLog   time.Time
 	logCount  int
@@ -205,46 +215,100 @@ func (c *redisClient) del(ctx context.Context, key string, fields []string) erro
 // closes the connection: its state is unknown. A command that fails on a
 // connection of the pool is run once more, on a new one (see stale).
 //
+// After redis.maxFailures failures in a row, Redis is given up on: commands
+// fail at once with errUnavailable, instead of making every request wait for a
+// timeout. One of them is let through every redis.retryAfter, the others
+// still failing while it runs: Redis is back when it succeeds.
+//
 // Like acquire, release and roundTrip, which run for every command too, it is
 // a function rather than a method of the client: under Yaegi, calling a method
 // costs several times what calling a function does.
 func do(ctx context.Context, c *redisClient, args [][]byte) (reply, error) {
+	c.stateMu.Lock()
+	failures := c.failures
+	if c.opts.maxFailures > 0 && failures >= c.opts.maxFailures {
+		now := time.Now()
+		if now.Before(c.retryAt) {
+			c.stateMu.Unlock()
+			return reply{}, errUnavailable
+		}
+		c.retryAt = now.Add(c.opts.retryAfter)
+	}
+	c.stateMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(ctx, c.opts.timeout)
 	defer cancel()
 
+	var r reply
 	conn, err := acquire(ctx, c)
-	if err != nil {
-		c.logError(err)
-		return reply{}, err
-	}
-	r, err := roundTrip(ctx, conn, c.maxBulk, args)
-	if err != nil && conn.reused && stale(err) {
-		_ = conn.nc.Close()
-		dialCtx, cancelDial := context.WithTimeout(ctx, c.opts.dialTimeout)
-		conn, err = c.dial(dialCtx)
-		cancelDial()
+	if err == nil {
+		r, err = roundTrip(ctx, conn, c.maxBulk, args)
+		if err != nil && conn.reused && stale(err) {
+			_ = conn.nc.Close()
+			dialCtx, cancelDial := context.WithTimeout(ctx, c.opts.dialTimeout)
+			conn, err = c.dial(dialCtx)
+			cancelDial()
+			if err == nil {
+				r, err = roundTrip(ctx, conn, c.maxBulk, args)
+			}
+		}
 		if err != nil {
 			release(c, nil)
-			c.logError(err)
-			return reply{}, err
+			if conn != nil {
+				_ = conn.nc.Close()
+			}
+		} else {
+			release(c, conn)
 		}
-		r, err = roundTrip(ctx, conn, c.maxBulk, args)
 	}
-	if err != nil {
-		release(c, nil)
-		_ = conn.nc.Close()
-		if !errors.Is(err, errTooLarge) {
-			c.logError(err)
-		}
+	// A value that is too large is still an answer.
+	if err != nil && !errors.Is(err, errTooLarge) {
+		c.failed(err)
 		return reply{}, err
 	}
-	release(c, conn)
+	if failures > 0 {
+		c.answered()
+	}
+	if err != nil {
+		return reply{}, err
+	}
 	if r.kind == '-' {
 		err := redisError(r.str)
 		c.logError(err)
 		return reply{}, err
 	}
 	return r, nil
+}
+
+// failed counts a command that Redis did not answer, for the breaker of do.
+// Neither a full pool nor a client that went away says anything of Redis.
+func (c *redisClient) failed(err error) {
+	c.logError(err)
+	if c.opts.maxFailures <= 0 || errors.Is(err, errPoolExhausted) || errors.Is(err, context.Canceled) {
+		return
+	}
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	now := time.Now()
+	c.retryAt = now.Add(c.opts.retryAfter)
+	if c.failures >= c.opts.maxFailures {
+		return
+	}
+	c.failures++
+	if c.failures == c.opts.maxFailures {
+		c.downSince = now
+		logf("redis: no answer to %d commands in a row: the cache is bypassed, and Redis tried again every %v: %v", c.failures, c.opts.retryAfter, err)
+	}
+}
+
+// answered ends a series of failures, and tells when Redis was given up on.
+func (c *redisClient) answered() {
+	c.stateMu.Lock()
+	defer c.stateMu.Unlock()
+	if c.opts.maxFailures > 0 && c.failures >= c.opts.maxFailures {
+		logf("redis: answers again after %v: the cache is back", time.Since(c.downSince).Round(time.Millisecond))
+	}
+	c.failures = 0
 }
 
 // stale reports whether err, the failure of a command on a connection of the
@@ -276,7 +340,7 @@ func acquire(ctx context.Context, c *redisClient) (*redisConn, error) {
 			{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())},
 		})
 		if chosen != 0 {
-			return nil, fmt.Errorf("redis: pool exhausted: %w", ctx.Err())
+			return nil, errPoolExhausted
 		}
 		if conn := idleConn(c); conn != nil {
 			return conn, nil
@@ -493,7 +557,12 @@ func (c *redisClient) logError(err error) {
 	if now.Sub(c.lastLog) < logInterval {
 		return
 	}
-	_, _ = fmt.Fprintf(os.Stderr, "traedis: redis error, bypassing the cache (%d errors since last report): %v\n", c.logCount, err)
+	logf("redis error, bypassing the cache (%d errors since last report): %v", c.logCount, err)
 	c.lastLog = now
 	c.logCount = 0
+}
+
+// logf writes a line to the log of Traefik.
+func logf(format string, args ...any) {
+	_, _ = fmt.Fprintf(os.Stderr, "traedis: "+format+"\n", args...)
 }

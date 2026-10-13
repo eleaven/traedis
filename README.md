@@ -17,7 +17,8 @@
 - **Dependency-free**: only uses the Go standard library, with no third-party module and no `unsafe`.
 - **Safe by default**: never caches what must not be shared (`Authorization`, `Set-Cookie`, `private`) unless the backend explicitly allows
   it. See [Security](#security) for the pitfalls.
-- **Fail open**: if Redis is slow or down, requests go straight to the backend, and Traefik still starts.
+- **Fail open**: if Redis is slow or down, requests go straight to the backend, and Traefik still starts. See
+  [Redis failures](#redis-failures).
 - **Observable**: every response tells what the cache did in a [`Cache-Status`](#added-by-traedis) header.
 - **Stream-friendly**: large bodies, WebSockets and server-sent events pass through untouched.
 - **Persistent and shared**: responses are stored in Redis, not in Traefik's memory: the cache survives restarts and redeploys, and all
@@ -68,6 +69,8 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `redis.dsn`                   | `redis://cache:6379/0` | `redis://[user[:password]@]host[:port][/db]`. TLS (`rediss://`) is not supported yet.                                                          |
 | `redis.dialTimeout`           | `50ms`                 | Maximum time to get a connection to Redis: a free one of the pool, or a new one. Past it, the cache is bypassed.                               |
 | `redis.timeout`               | `1s`                   | Maximum time for a whole Redis operation, getting the connection and transferring a body included. Past it, the cache is bypassed.             |
+| `redis.maxFailures`           | `5`                    | Failures in a row after which Redis is [no longer asked](#redis-failures). `0`: every request tries it.                                        |
+| `redis.retryAfter`            | `1s`                   | How often Redis is tried again once it is no longer asked.                                                                                     |
 | `statusCodes`                 | `[200]`                | Status codes allowed to be stored, at least one. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable.         |
 | `defaultTtl`                  | `5m`                   | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires`. `0` disables it.                                                       |
 | `staleTtl`                    | `1h`                   | How long an entry is kept in Redis after it expires: the upper bound of every [stale response](#stale-responses). `0` disables them.           |
@@ -145,7 +148,7 @@ Traedis adds these to the responses it sends to the client, and to the requests 
     served, fresh for `N` seconds again.
   - `fwd=stale; fwd-status=503; ttl=-N; detail=stale-if-error`: the backend failed, the stored response is served in place of its error.
   - `fwd=bypass`: forwarded untouched, WebSocket upgrade or server-sent events.
-  - `fwd=bypass; detail=redis`: forwarded, Redis failed or timed out.
+  - `fwd=bypass; detail=redis`: forwarded, Redis [failed, timed out or is no longer asked](#redis-failures).
   - `fwd=method`: forwarded, `OPTIONS`, `TRACE` or an unsafe method.
   - `fwd=method; detail=invalidated`: unsafe method, the stored responses of the URL were [removed](#invalidation-by-unsafe-methods)
     (`detail=redis`: Redis could not be reached).
@@ -258,6 +261,18 @@ When the backend answers a request with an unsafe method (any method that is not
   does not invalidate `/cart`, and the `Location` and `Content-Location` of the response are not followed.
 - There is no guarantee: if Redis cannot be reached at that moment, the stored responses stay until they expire, and a `GET` that was
   already on its way to the backend can store its response after the invalidation.
+
+### Redis failures
+
+The cache never fails a request because of Redis: what Redis cannot answer in time is forwarded to the backend, with
+`Cache-Status: traedis; fwd=bypass; detail=redis`, and its response is not stored.
+
+- Getting a connection takes at most `redis.dialTimeout`, and the whole operation `redis.timeout`: Redis has more time to send a large
+  body than to show that it is there.
+- A connection that was closed while it was idle (Redis restarted, a firewall dropped it) is replaced without a bypass.
+- After `redis.maxFailures` failures in a row, Redis is no longer asked: requests are forwarded at once, instead of each one waiting for a
+  timeout. One of them tries Redis again every `redis.retryAfter`, and the cache is back as soon as it answers.
+- Traefik logs the failures, at most once a minute, and when Redis is given up on and back.
 
 ## Security
 

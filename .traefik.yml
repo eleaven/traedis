@@ -9,6 +9,8 @@ testData:
     dsn: "redis://localhost:6379/0"
     dialTimeout: 50ms
     timeout: 1s
+    maxFailures: 5
+    retryAfter: 1s
   statusCodes: [ 200 ]
   defaultTtl: 5m
   staleTtl: 1h

@@ -94,8 +94,8 @@ func (f *fakeRedis) handle(c net.Conn) {
 		}
 		f.mu.Lock()
 		f.commands = append(f.commands, args)
-		f.mu.Unlock()
 		resp := f.replies[args[0]]
+		f.mu.Unlock()
 		if resp == "" {
 			continue // never answer
 		}
@@ -107,6 +107,13 @@ func (f *fakeRedis) handle(c net.Conn) {
 			return
 		}
 	}
+}
+
+// reply changes the reply to a command.
+func (f *fakeRedis) reply(command, raw string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.replies[command] = raw
 }
 
 // drop closes the connections of the clients, as a Redis that restarts does.
@@ -551,6 +558,135 @@ func TestRedisTimeoutIsNotRetried(t *testing.T) {
 	}
 	if accepts := f.connections(); accepts != 1 {
 		t.Errorf("connections = %d, want 1", accepts)
+	}
+}
+
+// breakerClient gives up on Redis after 3 failures, for 100 ms.
+func breakerClient(f *fakeRedis) *redisClient {
+	return newRedisClient(redisOptions{
+		addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond,
+		maxFailures: 3, retryAfter: 100 * time.Millisecond,
+	}, 1024)
+}
+
+// After redis.maxFailures failures in a row, Redis is no longer asked: the
+// commands fail at once. One is sent every redis.retryAfter, and all of them
+// again once it is answered.
+func TestRedisBreaker(t *testing.T) {
+	f := newFakeRedis(t, map[string]string{"HMGET": "?broken\r\n"})
+	c := breakerClient(f)
+	for i := 0; i < 3; i++ {
+		if _, err := getField(c, "k", ""); !errors.Is(err, errProtocol) {
+			t.Fatalf("get() %d = %v, want errProtocol", i, err)
+		}
+	}
+	for i := 0; i < 3; i++ {
+		if _, err := getField(c, "k", ""); !errors.Is(err, errUnavailable) {
+			t.Fatalf("get() once Redis is given up on = %v, want errUnavailable", err)
+		}
+	}
+	if n := len(f.received()); n != 3 {
+		t.Errorf("commands sent = %d, want 3", n)
+	}
+
+	// Tried again, in vain: not before another redis.retryAfter.
+	time.Sleep(120 * time.Millisecond)
+	if _, err := getField(c, "k", ""); !errors.Is(err, errProtocol) {
+		t.Fatalf("get() after redis.retryAfter = %v, want errProtocol", err)
+	}
+	if _, err := getField(c, "k", ""); !errors.Is(err, errUnavailable) {
+		t.Fatalf("get() after a failed attempt = %v, want errUnavailable", err)
+	}
+
+	f.reply("HMGET", defaultReplies["HMGET"])
+	if _, err := getField(c, "k", ""); !errors.Is(err, errUnavailable) {
+		t.Fatalf("get() before redis.retryAfter = %v, want errUnavailable", err)
+	}
+	time.Sleep(120 * time.Millisecond)
+	for i := 0; i < 3; i++ {
+		if v, err := getField(c, "k", ""); err != nil || string(v) != "hello" {
+			t.Fatalf("get() %d once Redis is back = %q, %v", i, v, err)
+		}
+	}
+	if n := len(f.received()); n != 7 {
+		t.Errorf("commands sent = %d, want 7", n)
+	}
+}
+
+// While the command that tries Redis again waits for its reply, the others
+// still fail at once.
+func TestRedisBreakerTriesOneCommand(t *testing.T) {
+	f := newFakeRedis(t, map[string]string{"HMGET": "?broken\r\n"})
+	c := breakerClient(f)
+	for i := 0; i < 3; i++ {
+		_, _ = getField(c, "k", "")
+	}
+	f.reply("HMGET", defaultReplies["HMGET"])
+	f.delay = 50 * time.Millisecond
+	time.Sleep(120 * time.Millisecond)
+
+	errs := make(chan error, 8)
+	for i := 0; i < 8; i++ {
+		go func() {
+			_, err := getField(c, "k", "")
+			errs <- err
+		}()
+	}
+	answered := 0
+	for i := 0; i < 8; i++ {
+		if err := <-errs; err == nil {
+			answered++
+		} else if !errors.Is(err, errUnavailable) {
+			t.Errorf("get() = %v, want errUnavailable", err)
+		}
+	}
+	if n := len(f.received()); answered != 1 || n != 4 {
+		t.Errorf("%d commands answered and %d sent, want 1 and 4", answered, n)
+	}
+}
+
+// Only failures in a row count, and only those of Redis: an error reply and a
+// value that is too large are answers, a full pool says nothing of it.
+func TestRedisBreakerStaysClosed(t *testing.T) {
+	f := newFakeRedis(t, map[string]string{
+		"HLEN":   "?broken\r\n",
+		"HSETEX": "-ERR unknown command 'HSETEX'\r\n",
+		"HMGET":  "*1\r\n$999999999999\r\n",
+	})
+	c := breakerClient(f)
+	ctx := context.Background()
+	for i := 0; i < 5; i++ {
+		_, _ = c.count(ctx, "k")
+		_, _ = c.count(ctx, "k")
+		if i%2 == 0 {
+			_ = c.set(ctx, "k", fieldValues("", "v"), time.Second, false)
+		} else if _, err := getField(c, "k", ""); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(f.received()); n != 15 {
+		t.Errorf("commands sent = %d, want 15", n)
+	}
+
+	for i := 0; i < redisPoolSize; i++ {
+		c.sem <- struct{}{}
+	}
+	c.opts.dialTimeout = 5 * time.Millisecond
+	for i := 0; i < 5; i++ {
+		if _, err := c.count(ctx, "k"); !errors.Is(err, errPoolExhausted) {
+			t.Fatalf("count() with a full pool = %v, want errPoolExhausted", err)
+		}
+	}
+}
+
+// redis.maxFailures 0: every command tries Redis.
+func TestRedisBreakerDisabled(t *testing.T) {
+	f := newFakeRedis(t, map[string]string{"HMGET": "?broken\r\n"})
+	c := testClient(f)
+	for i := 0; i < 10; i++ {
+		if _, err := getField(c, "k", ""); !errors.Is(err, errProtocol) {
+			t.Fatalf("get() %d = %v, want errProtocol", i, err)
+		}
 	}
 }
 
