@@ -8,20 +8,13 @@ import (
 	"time"
 )
 
-// Background revalidations (RFC 5861 §3) are bounded: at most maxRevalidations
-// at once, one per key, each given revalidationTimeout.
-const (
-	maxRevalidations    = 10
-	revalidationTimeout = 30 * time.Second
-)
-
 // revalidate refreshes e, the entry of key served to r, the one of field, in
-// the background (RFC 5861 §3), unless an entry of key is already being
-// refreshed or maxRevalidations are running: the next request for a stale
-// entry tries again.
+// the background (RFC 5861 §3). Background revalidations are bounded: one per
+// key and maxRevalidations at once, each given revalidationTimeout. Past
+// that, the next request for a stale entry tries again.
 func (c *cache) revalidate(r *http.Request, key, field string, e *entry) {
 	c.revalMu.Lock()
-	busy := c.revalidating[key] || len(c.revalidating) >= maxRevalidations
+	busy := c.revalidating[key] || len(c.revalidating) >= c.cfg.maxRevalidations
 	if !busy {
 		c.revalidating[key] = true
 	}
@@ -55,7 +48,7 @@ func (c *cache) revalidate(r *http.Request, key, field string, e *entry) {
 // is allowed.
 func (c *cache) refresh(req *http.Request, key, field string, e *entry) {
 	defer c.revalidated(key)
-	ctx, cancel := context.WithTimeout(req.Context(), revalidationTimeout)
+	ctx, cancel := context.WithTimeout(req.Context(), c.cfg.revalidationTimeout)
 	defer cancel()
 	req = req.WithContext(ctx)
 

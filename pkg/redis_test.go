@@ -167,7 +167,7 @@ func readCommand(r *bufio.Reader) ([]string, error) {
 }
 
 func testClient(f *fakeRedis) *redisClient {
-	return newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}, 1024)
+	return newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}, 1024)
 }
 
 // getField reads one field of key: nil when it is not there.
@@ -372,6 +372,7 @@ func TestRedisDialSendsAuthAndSelect(t *testing.T) {
 			f := newFakeRedis(t, nil)
 			opts := tt.opts
 			opts.addr = f.ln.Addr().String()
+			opts.poolSize = 10
 			opts.dialTimeout = 200 * time.Millisecond
 			opts.timeout = 200 * time.Millisecond
 			if _, err := getField(newRedisClient(opts, 1024), "k", ""); err != nil {
@@ -391,7 +392,7 @@ func TestRedisDialSendsAuthAndSelect(t *testing.T) {
 
 func TestRedisAuthFailure(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"AUTH": "-WRONGPASS invalid username-password pair\r\n"})
-	opts := redisOptions{addr: f.ln.Addr().String(), password: "s3cret", dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}
+	opts := redisOptions{poolSize: 10, addr: f.ln.Addr().String(), password: "s3cret", dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}
 	_, err := getField(newRedisClient(opts, 1024), "k", "")
 	if err == nil {
 		t.Fatal("expected an error")
@@ -464,7 +465,7 @@ func TestRedisUntrustedReplies(t *testing.T) {
 
 func TestRedisTimeout(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HMGET": ""})
-	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
 	start := time.Now()
 	if _, err := getField(c, "k", ""); err == nil {
 		t.Fatal("expected a timeout")
@@ -479,7 +480,7 @@ func TestRedisTimeout(t *testing.T) {
 func TestRedisSlowReply(t *testing.T) {
 	f := newFakeRedis(t, nil)
 	f.delay = 100 * time.Millisecond
-	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 20 * time.Millisecond, timeout: 5 * time.Second}, 1024)
+	c := newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 20 * time.Millisecond, timeout: 5 * time.Second}, 1024)
 	for i := 0; i < 2; i++ { // on a new connection, then on the idle one
 		if v, err := getField(c, "k", ""); err != nil || string(v) != "hello" {
 			t.Fatalf("get() = %q, %v", v, err)
@@ -490,7 +491,7 @@ func TestRedisSlowReply(t *testing.T) {
 // Setting up a new connection is part of getting it.
 func TestRedisDialTimeout(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"AUTH": ""})
-	opts := redisOptions{addr: f.ln.Addr().String(), password: "p", dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}
+	opts := redisOptions{poolSize: 10, addr: f.ln.Addr().String(), password: "p", dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}
 	c := newRedisClient(opts, 1024)
 	start := time.Now()
 	if _, err := getField(c, "k", ""); err == nil {
@@ -549,7 +550,7 @@ func TestRedisRetryFails(t *testing.T) {
 // A reply that does not come in time is not waited for twice.
 func TestRedisTimeoutIsNotRetried(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HLEN": ""})
-	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
 	if _, err := getField(c, "k", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +565,7 @@ func TestRedisTimeoutIsNotRetried(t *testing.T) {
 // breakerClient gives up on Redis after 3 failures, for 100 ms.
 func breakerClient(f *fakeRedis) *redisClient {
 	return newRedisClient(redisOptions{
-		addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond,
+		poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond,
 		maxFailures: 3, retryAfter: 100 * time.Millisecond,
 	}, 1024)
 }
@@ -668,7 +669,7 @@ func TestRedisBreakerStaysClosed(t *testing.T) {
 		t.Errorf("commands sent = %d, want 15", n)
 	}
 
-	for i := 0; i < redisPoolSize; i++ {
+	for i := 0; i < cap(c.sem); i++ {
 		c.sem <- struct{}{}
 	}
 	c.opts.dialTimeout = 5 * time.Millisecond
@@ -692,8 +693,8 @@ func TestRedisBreakerDisabled(t *testing.T) {
 
 func TestRedisPoolExhausted(t *testing.T) {
 	f := newFakeRedis(t, nil)
-	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}, 1024)
-	for i := 0; i < redisPoolSize; i++ {
+	c := newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}, 1024)
+	for i := 0; i < cap(c.sem); i++ {
 		c.sem <- struct{}{}
 	}
 	start := time.Now()
@@ -710,8 +711,8 @@ func TestRedisPoolExhausted(t *testing.T) {
 
 func TestRedisPoolWaitsForAConnection(t *testing.T) {
 	f := newFakeRedis(t, nil)
-	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 2 * time.Second, timeout: 2 * time.Second}, 1024)
-	for i := 0; i < redisPoolSize; i++ {
+	c := newRedisClient(redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 2 * time.Second, timeout: 2 * time.Second}, 1024)
+	for i := 0; i < cap(c.sem); i++ {
 		c.sem <- struct{}{}
 	}
 	go func() {
@@ -733,7 +734,7 @@ func TestRedisPoolWaitsForAConnection(t *testing.T) {
 func TestRedisPoolConcurrency(t *testing.T) {
 	const workers, rounds = 32, 100
 	f := newFakeRedis(t, map[string]string{"HMGET": echoKey})
-	c := newRedisClient(redisOptions{addr: f.ln.Addr().String(), dialTimeout: 5 * time.Second, timeout: 5 * time.Second}, 1024)
+	c := newRedisClient(redisOptions{poolSize: 4, addr: f.ln.Addr().String(), dialTimeout: 5 * time.Second, timeout: 5 * time.Second}, 1024)
 
 	failures := make(chan string, workers)
 	var wg sync.WaitGroup
@@ -755,8 +756,8 @@ func TestRedisPoolConcurrency(t *testing.T) {
 	for failure := range failures {
 		t.Error(failure)
 	}
-	if accepts := f.connections(); accepts > redisPoolSize {
-		t.Errorf("connections = %d, want at most %d", accepts, redisPoolSize)
+	if accepts := f.connections(); accepts > 4 {
+		t.Errorf("connections = %d, want at most 4, redis.poolSize", accepts)
 	}
 }
 
@@ -768,7 +769,7 @@ func TestRedisUnreachable(t *testing.T) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 
-	c := newRedisClient(redisOptions{addr: addr, dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient(redisOptions{poolSize: 10, addr: addr, dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
 	if _, err := getField(c, "k", ""); err == nil {
 		t.Fatal("expected an error")
 	}
@@ -788,6 +789,7 @@ func integrationClient(t *testing.T) *redisClient {
 	if err != nil {
 		t.Fatal(err)
 	}
+	opts.poolSize = 10
 	opts.dialTimeout = time.Second
 	opts.timeout = time.Second
 	return newRedisClient(opts, 1<<20)

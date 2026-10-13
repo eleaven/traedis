@@ -26,7 +26,6 @@ import (
 )
 
 const (
-	redisPoolSize = 10
 	// maxLineBytes bounds RESP status lines; longer lines are a protocol error.
 	maxLineBytes = 4096
 	// maxArrayItems bounds RESP arrays: the replies to HMGET and HPEXPIRE have
@@ -51,7 +50,8 @@ type redisError string
 
 func (e redisError) Error() string { return "redis: " + string(e) }
 
-// redisClient is a minimal RESP2 client with a bounded connection pool.
+// redisClient is a minimal RESP2 client with a pool of at most redis.poolSize
+// connections.
 // Every operation is bounded by redis.timeout, and getting its connection by
 // redis.dialTimeout: Redis has more time to send a body than to show it is
 // there.
@@ -67,7 +67,7 @@ type redisClient struct {
 	// once: its first case is the send to sem, its second one the default.
 	takeToken []reflect.SelectCase
 	idleMu    sync.Mutex
-	idle      []*redisConn // at most redisPoolSize: only token holders add to it
+	idle      []*redisConn // at most redis.poolSize: only token holders add to it
 	// The breaker (see do): failures counts the commands that failed in a row,
 	// up to redis.maxFailures; from there, retryAt is when the next command
 	// may be sent, and downSince when it was reached.
@@ -98,7 +98,7 @@ type reply struct {
 }
 
 func newRedisClient(opts redisOptions, maxBulk int64) *redisClient {
-	sem := make(chan struct{}, redisPoolSize)
+	sem := make(chan struct{}, opts.poolSize)
 	return &redisClient{
 		opts:    opts,
 		maxBulk: maxBulk,

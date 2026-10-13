@@ -14,7 +14,7 @@ func TestCreateConfigDefaults(t *testing.T) {
 		t.Fatalf("default config rejected: %v", err)
 	}
 	if s.redis.addr != "cache:6379" || s.redis.db != 0 || s.redis.dialTimeout != 50*time.Millisecond || s.redis.timeout != time.Second ||
-		s.redis.maxFailures != 5 || s.redis.retryAfter != time.Second {
+		s.redis.poolSize != 10 || s.redis.maxFailures != 5 || s.redis.retryAfter != time.Second {
 		t.Errorf("redis = %+v", s.redis)
 	}
 	if len(s.statusCodes) != 1 || s.statusCodes[0] != 200 {
@@ -25,6 +25,9 @@ func TestCreateConfigDefaults(t *testing.T) {
 	}
 	if s.defaultStaleWhileRevalidate != 0 || s.defaultStaleIfError != 0 {
 		t.Errorf("§4.2.4 no stale response unless the backend or the configuration allows it: %v, %v", s.defaultStaleWhileRevalidate, s.defaultStaleIfError)
+	}
+	if s.maxRevalidations != 10 || s.revalidationTimeout != 30*time.Second {
+		t.Errorf("maxRevalidations = %d, revalidationTimeout = %v", s.maxRevalidations, s.revalidationTimeout)
 	}
 	if s.maxBodyBytes != 5242880 || s.maxVariants != 16 || s.sortQuery || s.exposeKey {
 		t.Errorf("settings = %+v", s)
@@ -43,6 +46,10 @@ func TestParseConfig(t *testing.T) {
 		{name: "invalid redis.dialTimeout", mutate: func(c *Config) { c.Redis.DialTimeout = "fast" }, wantErr: "redis.dialTimeout"},
 		{name: "zero redis.dialTimeout", mutate: func(c *Config) { c.Redis.DialTimeout = "0" }, wantErr: "redis.dialTimeout"},
 		{name: "redis.dialTimeout past redis.timeout", mutate: func(c *Config) { c.Redis.Timeout = "20ms" }, wantErr: "redis.dialTimeout must not exceed redis.timeout"},
+		{name: "zero redis.poolSize", mutate: func(c *Config) { c.Redis.PoolSize = 0 }, wantErr: "redis.poolSize"},
+		{name: "zero maxRevalidations", mutate: func(c *Config) { c.MaxRevalidations = 0 }, wantErr: "maxRevalidations"},
+		{name: "invalid revalidationTimeout", mutate: func(c *Config) { c.RevalidationTimeout = "30" }, wantErr: "revalidationTimeout"},
+		{name: "zero revalidationTimeout", mutate: func(c *Config) { c.RevalidationTimeout = "0s" }, wantErr: "revalidationTimeout"},
 		{name: "negative redis.maxFailures", mutate: func(c *Config) { c.Redis.MaxFailures = -1 }, wantErr: "redis.maxFailures"},
 		{
 			name:   "redis.maxFailures 0 never gives up on Redis",
@@ -164,6 +171,7 @@ func TestParseDSNErrorsDoNotLeakCredentials(t *testing.T) {
 func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg := CreateConfig()
 	cfg.Redis.DSN = "redis://localhost:6379/0"
+	cfg.Redis.PoolSize = 10
 	cfg.Redis.DialTimeout = "50ms"
 	cfg.Redis.Timeout = "1s"
 	cfg.Redis.MaxFailures = 5
@@ -175,6 +183,9 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.DefaultStaleIfError = "0s"
 	cfg.MaxBodyBytes = 5242880
 	cfg.MaxVariants = 16
+	cfg.MaxRevalidations = 10
+	cfg.RevalidationTimeout = "30s"
+	cfg.SortQuery = false
 	cfg.ExposeKey = false
 
 	if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "cache"); err != nil {

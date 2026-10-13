@@ -67,6 +67,7 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | Key                           | Default                | Description                                                                                                                                    |
 |-------------------------------|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
 | `redis.dsn`                   | `redis://cache:6379/0` | `redis://[user[:password]@]host[:port][/db]`. TLS (`rediss://`) is not supported yet.                                                          |
+| `redis.poolSize`              | `10`                   | Connections to Redis, at most, for each middleware in each Traefik instance. A request that finds them all busy waits for one.                 |
 | `redis.dialTimeout`           | `50ms`                 | Maximum time to get a connection to Redis: a free one of the pool, or a new one. Past it, the cache is bypassed.                               |
 | `redis.timeout`               | `1s`                   | Maximum time for a whole Redis operation, getting the connection and transferring a body included. Past it, the cache is bypassed.             |
 | `redis.maxFailures`           | `5`                    | Failures in a row after which Redis is [no longer asked](#redis-failures). `0`: every request tries it.                                        |
@@ -78,6 +79,8 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `defaultStaleIfError`         | `0s`                   | `stale-if-error` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                                      |
 | `maxBodyBytes`                | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached. At most 512 MiB, the largest value Redis takes.                                    |
 | `maxVariants`                 | `16`                   | Stored [variants](#variants) per URL. `0`: responses with `Vary` are not cached.                                                          |
+| `maxRevalidations`            | `10`                   | [Background refreshes](#stale-responses) running at once, for each middleware in each Traefik instance.                                        |
+| `revalidationTimeout`         | `30s`                  | Maximum time of a background refresh.                                                                                                          |
 | `sortQuery`                   | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
 | `exposeKey`                   | `false`                | Add the [Redis key](#cacheable-responses) to the `Cache-Status` header (`key="…"`).                                                            |
 
@@ -233,8 +236,8 @@ it like a `304`; a different one drops a stored response that was still fresh.
 A stored response that is no longer fresh is served only when allowed, for at most `staleTtl`:
 
 - **`stale-while-revalidate`** ([RFC 5861][rfc5861]): it is served at once and refreshed in the background, with at most one refresh per
-  URL and 10 at a time in each Traefik instance. Not for a request with `max-age` or `min-fresh` (a browser reload), which waits for the
-  backend.
+  URL and `maxRevalidations` at a time: past it, the refresh is left to a later request. Not for a request with `max-age` or `min-fresh`
+  (a browser reload), which waits for the backend.
 - **`stale-if-error`**: it replaces a `500`, `502`, `503` or `504`, including those of Traefik when the backend is unreachable. A request
   with `max-age` or `min-fresh` gets it too, one with `no-cache` does not.
 - **`max-stale`** on the request ([RFC 9111 §5.2.1.2](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1.2)): it is served as it is,

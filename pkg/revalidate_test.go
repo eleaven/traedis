@@ -288,11 +288,41 @@ func TestRevalidationIsNotRepeatedWhileRunning(t *testing.T) {
 	}
 }
 
+// waitingBackend never answers: it waits for its request to be given up, as
+// Traefik's proxy does, which then answers a 504.
+type waitingBackend struct {
+	gaveUp chan struct{}
+}
+
+func (b *waitingBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	<-r.Context().Done()
+	w.WriteHeader(http.StatusGatewayTimeout)
+	close(b.gaveUp)
+}
+
+// A background revalidation is given revalidationTimeout: a backend that
+// never answers does not keep its place for ever.
+func TestRevalidationTimeout(t *testing.T) {
+	b := &waitingBackend{gaveUp: make(chan struct{})}
+	c, st := newTestCache(t, b, func(cfg *Config) { cfg.RevalidationTimeout = "50ms" })
+	storeAged(t, st, "max-age=60, stale-while-revalidate=30", 70*time.Second)
+
+	rec := doRequest(c, http.MethodGet, staleURL, nil)
+	if rec.Body.String() != "old" || !isStaleWhileRevalidate(lastCacheStatus(rec)) {
+		t.Fatalf("got %q %q", rec.Body.String(), lastCacheStatus(rec))
+	}
+	<-b.gaveUp
+	waitRevalidations(t, c)
+	if e := st.entry(cacheKey(staleURL), ""); e == nil || e.status != http.StatusOK {
+		t.Errorf("the stale entry must be kept: %+v", e)
+	}
+}
+
 func TestRevalidationsAreBounded(t *testing.T) {
 	b := cacheableBackend()
-	c, st := newTestCache(t, b, nil)
+	c, st := newTestCache(t, b, func(cfg *Config) { cfg.MaxRevalidations = 3 })
 	storeAged(t, st, "max-age=60, stale-while-revalidate=30", 70*time.Second)
-	for i := 0; i < maxRevalidations; i++ {
+	for i := 0; i < c.cfg.maxRevalidations; i++ {
 		c.revalidating["traedis:busy"+strconv.Itoa(i)] = true
 	}
 
@@ -300,7 +330,7 @@ func TestRevalidationsAreBounded(t *testing.T) {
 	if rec.Body.String() != "old" || !isStaleWhileRevalidate(lastCacheStatus(rec)) {
 		t.Errorf("the stale response must still be served: got %q %q", rec.Body.String(), lastCacheStatus(rec))
 	}
-	if len(c.revalidating) != maxRevalidations || b.calls != 0 {
+	if len(c.revalidating) != c.cfg.maxRevalidations || b.calls != 0 {
 		t.Errorf("revalidations = %d, backend calls = %d: the limit must hold", len(c.revalidating), b.calls)
 	}
 }

@@ -7,6 +7,7 @@ summary: 'Redis-backed HTTP cache for Traefik'
 testData:
   redis:
     dsn: "redis://localhost:6379/0"
+    poolSize: 10
     dialTimeout: 50ms
     timeout: 1s
     maxFailures: 5
@@ -18,5 +19,7 @@ testData:
   defaultStaleIfError: 0s
   maxBodyBytes: 5242880
   maxVariants: 16
+  maxRevalidations: 10
+  revalidationTimeout: 30s
   sortQuery: false
   exposeKey: false

@@ -27,6 +27,8 @@ type Config struct {
 	DefaultStaleIfError         string      `json:"defaultStaleIfError,omitempty"`
 	MaxBodyBytes                int64       `json:"maxBodyBytes,omitempty"`
 	MaxVariants                 int         `json:"maxVariants,omitempty"`
+	MaxRevalidations            int         `json:"maxRevalidations,omitempty"`
+	RevalidationTimeout         string      `json:"revalidationTimeout,omitempty"`
 	SortQuery                   bool        `json:"sortQuery,omitempty"`
 	ExposeKey                   bool        `json:"exposeKey,omitempty"`
 }
@@ -34,6 +36,7 @@ type Config struct {
 // RedisConfig holds the Redis connection options.
 type RedisConfig struct {
 	DSN         string `json:"dsn,omitempty"`
+	PoolSize    int    `json:"poolSize,omitempty"`
 	DialTimeout string `json:"dialTimeout,omitempty"`
 	Timeout     string `json:"timeout,omitempty"`
 	MaxFailures int    `json:"maxFailures,omitempty"`
@@ -45,6 +48,7 @@ func CreateConfig() *Config {
 	return &Config{
 		Redis: RedisConfig{
 			DSN:         "redis://cache:6379/0",
+			PoolSize:    10,
 			DialTimeout: "50ms",
 			Timeout:     "1s",
 			MaxFailures: 5,
@@ -57,6 +61,8 @@ func CreateConfig() *Config {
 		DefaultStaleIfError:         "0s",
 		MaxBodyBytes:                5 << 20,
 		MaxVariants:                 16,
+		MaxRevalidations:            10,
+		RevalidationTimeout:         "30s",
 		SortQuery:                   false,
 		ExposeKey:                   false,
 	}
@@ -75,6 +81,10 @@ type settings struct {
 	// marker. Past it, new variants are not stored: stored ones are never
 	// evicted. 0: responses with Vary are not stored.
 	maxVariants int
+	// Background revalidations (RFC 5861 §3) are bounded: maxRevalidations at
+	// once, each given revalidationTimeout (see revalidate).
+	maxRevalidations    int
+	revalidationTimeout time.Duration
 	// sortQuery makes the order of the query parameters irrelevant to the
 	// cache key (see cacheURI).
 	sortQuery bool
@@ -87,6 +97,8 @@ type redisOptions struct {
 	username string
 	password string
 	db       int
+	// poolSize is the number of connections, at most.
+	poolSize int
 	// dialTimeout bounds getting a connection, a free one of the pool or a new
 	// one; timeout bounds a whole operation, getting its connection included.
 	dialTimeout time.Duration
@@ -120,6 +132,10 @@ func parseConfig(cfg *Config) (settings, error) {
 	if redis.dialTimeout > redis.timeout {
 		return s, errors.New("redis.dialTimeout must not exceed redis.timeout")
 	}
+	if cfg.Redis.PoolSize <= 0 {
+		return s, errors.New("redis.poolSize must be positive")
+	}
+	redis.poolSize = cfg.Redis.PoolSize
 	if cfg.Redis.MaxFailures < 0 {
 		return s, errors.New("redis.maxFailures must not be negative")
 	}
@@ -184,6 +200,17 @@ func parseConfig(cfg *Config) (settings, error) {
 		return s, errors.New("maxVariants must not be negative")
 	}
 	s.maxVariants = cfg.MaxVariants
+
+	if cfg.MaxRevalidations <= 0 {
+		return s, errors.New("maxRevalidations must be positive")
+	}
+	s.maxRevalidations = cfg.MaxRevalidations
+	if s.revalidationTimeout, err = parseDuration("revalidationTimeout", cfg.RevalidationTimeout); err != nil {
+		return s, err
+	}
+	if s.revalidationTimeout <= 0 {
+		return s, errors.New("revalidationTimeout must be positive")
+	}
 
 	s.sortQuery = cfg.SortQuery
 	s.exposeKey = cfg.ExposeKey
