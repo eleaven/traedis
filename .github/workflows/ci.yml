@@ -143,7 +143,7 @@ jobs:
 
           echo "new=true" >> "$GITHUB_OUTPUT"
 
-  # Creates the tag and the GitHub release
+  # Creates the tag and the GitHub release, with the notes of the version in CHANGELOG.md
   release:
     needs: [ validate-version, detect-new-version ]
     if: needs.detect-new-version.outputs.new == 'true'
@@ -154,9 +154,24 @@ jobs:
     permissions:
       contents: write
     steps:
-      # With the GitHub CLI of the runner: no third-party action in the job that may write to the repository
+      - uses: actions/checkout@v7
+      # The text of the release is the section of the version in CHANGELOG.md: what follows its `## vX.Y.Z` title,
+      # up to the next one
+      - name: Read the notes of the version in CHANGELOG.md
+        env:
+          VERSION: ${{ needs.validate-version.outputs.version }}
+        run: |
+          awk -v version="$VERSION" '/^## / { found = ($2 == version); next } found' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "::error file=CHANGELOG.md::No section for $VERSION (expected a '## $VERSION' title followed by what the version changes)"
+            exit 1
+          fi
+      # With the GitHub CLI of the runner: no third-party action in the job that may write to the repository.
+      # --generate-notes adds the link to the comparison with the previous version after the notes
       - name: Create the tag and the release
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.validate-version.outputs.version }}
-        run: gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$VERSION" --generate-notes
+        run: >-
+          gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$VERSION"
+          --notes "$(< "$RUNNER_TEMP/notes.md")" --generate-notes

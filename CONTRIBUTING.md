@@ -16,6 +16,7 @@ benchmark/         # benchmarks under Yaegi, k6 load test, results viewer
 compose.yml        # local stack: Traefik, Redis, sample backends (whoami, placeholder, imgproxy), Redis Insight
 .traefik.yml       # plugin manifest of the Traefik Plugin Catalog
 VERSION            # the version to release
+CHANGELOG.md       # what each version changes: the text of its GitHub release
 ```
 
 ## Commands
@@ -57,8 +58,10 @@ make help        # list all targets
 
 `make test` has to pass: the [CI][ci] runs it on every pull request. It also runs the benchmarks, for information only.
 
-The version is the content of `VERSION` (`vMAJOR.MINOR.PATCH`). To release, set it to the next patch, minor or major of the last release:
-on `main`, the CI checks it once the tests pass.
+The version is the content of `VERSION` (`vMAJOR.MINOR.PATCH`). To release, set it to the next patch, minor or major of the last release,
+and describe it in a `## vX.Y.Z` section at the top of [`CHANGELOG.md`](CHANGELOG.md): what it breaks, adds and fixes for those who use the
+plugin. On `main`, once the tests pass, the CI checks the version, then creates its tag and its GitHub release with that section as its
+text. Without the section, nothing is released.
 
 [ci]: https://github.com/eleaven/traedis/actions/workflows/ci.yml
 [rfc9111]: https://www.rfc-editor.org/rfc/rfc9111
