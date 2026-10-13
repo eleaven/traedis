@@ -292,7 +292,7 @@ func (c *cache) serve(w http.ResponseWriter, r *http.Request, e *entry, age, lif
 	if bodyAllowed(e.status) {
 		h.Set("Content-Length", strconv.FormatInt(e.size, 10))
 	}
-	if e.status == http.StatusOK && r.Method == http.MethodGet && wantsRange(r.Header, h) {
+	if len(r.Header["Range"]) > 0 && e.status == http.StatusOK && r.Method == http.MethodGet && wantsRange(r.Header, h) {
 		serveRange(w, r, e)
 		return
 	}

@@ -335,7 +335,15 @@ func acquire(ctx context.Context, c *redisClient) (*redisConn, error) {
 	// select { case c.sem <- struct{}{}: default: }
 	chosen, _, _ := reflect.Select(c.takeToken)
 	if chosen == 0 {
-		if conn := idleConn(c); conn != nil {
+		// As idleConn, without the cost of its call under Yaegi.
+		var conn *redisConn
+		c.idleMu.Lock()
+		if n := len(c.idle); n > 0 {
+			conn = c.idle[n-1]
+			c.idle = c.idle[:n-1]
+		}
+		c.idleMu.Unlock()
+		if conn != nil {
 			return conn, nil
 		}
 	}
