@@ -1,8 +1,9 @@
 > [!WARNING]
 > **This project is in its early stages.** Use it at your own risk.
 
-<!-- The Traefik Plugin Catalog shows this file on another site: the links of its images are absolute, and not to github.com, which it
-     rewrites to raw.githubusercontent.com -->
+<!-- The Traefik Plugin Catalog shows this file on another site, where it rewrites every https://github.com/ link to
+     raw.githubusercontent.com. So the links are absolute: to a file through /blob/, which that turns into the file itself, and to
+     anything else (a directory, a workflow) through www.github.com, which it leaves alone -->
 <!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
   <img src="https://raw.githubusercontent.com/eleaven/traedis/main/assets/icon.svg" alt="Traedis Logo" height="360">
@@ -60,7 +61,7 @@ http:
 ```
 
 Authentication and rate limiting go before the cache: see [Security](#security). A complete local setup (Traefik, Redis, sample backends) is
-available in [`compose.yml`](compose.yml) and [`example/`](example).
+available in [`compose.yml`][compose] and [`example/`][example].
 
 ## Configuration
 
@@ -213,7 +214,7 @@ that accepts that coding.
 > [!NOTE]
 > Traefik's `compress` middleware only adds `Vary: Accept-Encoding` to the responses it compresses: placed after the cache, its uncompressed
 > response has no `Vary` and is served to everyone. Put `compress` before the cache, or set `Vary: Accept-Encoding` on every response with a
-> `headers` middleware, as [`example/dynamic/whoami.yml`](example/dynamic/whoami.yml) does.
+> `headers` middleware, as [`example/dynamic/whoami.yml`][whoami] does.
 
 ### Conditional requests
 
@@ -357,20 +358,24 @@ Every [CI][ci] run publishes its own in its summary, with the p95 and the cost o
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the local stack, the tests and the rules of the project.
+See [CONTRIBUTING.md][contributing] for the local stack, the tests and the rules of the project.
 
 ## License
 
-[MIT](LICENSE)
+[MIT][license]
 
-[ci]: https://github.com/eleaven/traedis/actions/workflows/ci.yml
+[ci]: https://www.github.com/eleaven/traedis/actions/workflows/ci.yml
 [rfc9111]: https://www.rfc-editor.org/rfc/rfc9111
 [rfc9111-4.1]: https://www.rfc-editor.org/rfc/rfc9111#section-4.1
 [rfc9111-4.3]: https://www.rfc-editor.org/rfc/rfc9111#section-4.3
 [rfc9111-4.4]: https://www.rfc-editor.org/rfc/rfc9111#section-4.4
 [rfc5861]: https://www.rfc-editor.org/rfc/rfc5861
 [rfc9211]: https://www.rfc-editor.org/rfc/rfc9211
-[bench-run]: https://github.com/eleaven/traedis/actions/runs/38289730377/attempts/1#summary-114946639664
-[whoami]: example/dynamic/whoami.yml
-[placeholder]: example/dynamic/placeholder.yml
-[imaging]: example/dynamic/imaging.yml
+[bench-run]: https://www.github.com/eleaven/traedis/actions/runs/38289730377/attempts/1#summary-114946639664
+[whoami]: https://github.com/eleaven/traedis/blob/main/example/dynamic/whoami.yml
+[placeholder]: https://github.com/eleaven/traedis/blob/main/example/dynamic/placeholder.yml
+[imaging]: https://github.com/eleaven/traedis/blob/main/example/dynamic/imaging.yml
+[compose]: https://github.com/eleaven/traedis/blob/main/compose.yml
+[example]: https://www.github.com/eleaven/traedis/tree/main/example
+[contributing]: https://github.com/eleaven/traedis/blob/main/CONTRIBUTING.md
+[license]: https://github.com/eleaven/traedis/blob/main/LICENSE
