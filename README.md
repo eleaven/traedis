@@ -67,12 +67,12 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 |-------------------------------|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
 | `redis.dsn`                   | `redis://cache:6379/0` | `redis://[user[:password]@]host[:port][/db]`. TLS (`rediss://`) is not supported yet.                                                          |
 | `redis.timeout`               | `50ms`                 | Maximum time for a Redis operation. Past it, the cache is bypassed.                                                                            |
-| `statusCodes`                 | `[200]`                | Status codes allowed to be stored. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable.                                  |
+| `statusCodes`                 | `[200]`                | Status codes allowed to be stored, at least one. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable.         |
 | `defaultTtl`                  | `5m`                   | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires`. `0` disables it.                                                       |
 | `staleTtl`                    | `1h`                   | How long an entry is kept in Redis after it expires: the upper bound of every [stale response](#stale-responses). `0` disables them.           |
-| `defaultStaleWhileRevalidate` | `0s`                   | `stale-while-revalidate` window for responses that don't send the directive. `0` disables it.                                                  |
-| `defaultStaleIfError`         | `0s`                   | `stale-if-error` window for responses that don't send the directive. `0` disables it.                                                          |
-| `maxBodyBytes`                | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached.                                                                                    |
+| `defaultStaleWhileRevalidate` | `0s`                   | `stale-while-revalidate` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                              |
+| `defaultStaleIfError`         | `0s`                   | `stale-if-error` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                                      |
+| `maxBodyBytes`                | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached. At most 512 MiB, the largest value Redis takes.                                    |
 | `maxVariants`                 | `16`                   | Stored [variants](#variants) per URL. `0`: responses with `Vary` are not cached.                                                          |
 | `sortQuery`                   | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
 | `exposeKey`                   | `false`                | Add the Redis key to the `Cache-Status` header (`key="…"`).                                                                                    |

@@ -52,8 +52,24 @@ func TestParseConfig(t *testing.T) {
 				}
 			},
 		},
+		{name: "defaultStaleWhileRevalidate past staleTtl", mutate: func(c *Config) { c.DefaultStaleWhileRevalidate = "2h" }, wantErr: "defaultStaleWhileRevalidate must not exceed staleTtl"},
+		{name: "defaultStaleIfError without staleTtl", mutate: func(c *Config) { c.StaleTTL = "0"; c.DefaultStaleIfError = "10m" }, wantErr: "defaultStaleIfError must not exceed staleTtl"},
+		{
+			name:   "stale windows up to staleTtl",
+			mutate: func(c *Config) { c.DefaultStaleWhileRevalidate = "1h"; c.DefaultStaleIfError = "1h" },
+			check: func(t *testing.T, s settings) {
+				if s.defaultStaleWhileRevalidate != time.Hour || s.defaultStaleIfError != time.Hour {
+					t.Errorf("settings = %+v", s)
+				}
+			},
+		},
 		{name: "invalid status code", mutate: func(c *Config) { c.StatusCodes = []int{200, 999} }, wantErr: "statusCodes"},
+		{name: "no status code", mutate: func(c *Config) { c.StatusCodes = []int{} }, wantErr: "statusCodes must not be empty"},
+		{name: "informational status code", mutate: func(c *Config) { c.StatusCodes = []int{200, 103} }, wantErr: "a 103 response is never stored"},
+		{name: "§3.3 partial content", mutate: func(c *Config) { c.StatusCodes = []int{200, 206} }, wantErr: "a 206 response is never stored"},
+		{name: "§3.2 not modified", mutate: func(c *Config) { c.StatusCodes = []int{304} }, wantErr: "a 304 response is never stored"},
 		{name: "zero maxBodyBytes", mutate: func(c *Config) { c.MaxBodyBytes = 0 }, wantErr: "maxBodyBytes"},
+		{name: "maxBodyBytes past what Redis takes", mutate: func(c *Config) { c.MaxBodyBytes = 512<<20 + 1 }, wantErr: "maxBodyBytes must not exceed"},
 		{name: "negative maxVariants", mutate: func(c *Config) { c.MaxVariants = -1 }, wantErr: "maxVariants"},
 		{
 			name:   "maxVariants 0 disables variants",

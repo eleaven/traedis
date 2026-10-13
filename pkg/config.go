@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
@@ -12,6 +13,9 @@ import (
 )
 
 const defaultRedisPort = "6379"
+
+// maxValueBytes is the largest value Redis takes by default (proto-max-bulk-len).
+const maxValueBytes = 512 << 20
 
 // Config is the plugin configuration, as written in the Traefik dynamic configuration.
 type Config struct {
@@ -111,15 +115,38 @@ func parseConfig(cfg *Config) (settings, error) {
 		return s, err
 	}
 
+	for _, window := range []struct {
+		name  string
+		value time.Duration
+	}{
+		{"defaultStaleWhileRevalidate", s.defaultStaleWhileRevalidate},
+		{"defaultStaleIfError", s.defaultStaleIfError},
+	} {
+		// Nothing is kept past staleTtl: a longer window would never be honoured.
+		if window.value > s.staleTTL {
+			return s, fmt.Errorf("%s must not exceed staleTtl", window.name)
+		}
+	}
+
+	if len(cfg.StatusCodes) == 0 {
+		return s, errors.New("statusCodes must not be empty")
+	}
 	for _, code := range cfg.StatusCodes {
 		if code < 100 || code > 599 {
 			return s, fmt.Errorf("statusCodes: invalid status code %d", code)
+		}
+		// See storeTTL: these are never stored, whatever the configuration.
+		if code < 200 || code == http.StatusPartialContent || code == http.StatusNotModified {
+			return s, fmt.Errorf("statusCodes: a %d response is never stored", code)
 		}
 	}
 	s.statusCodes = append([]int(nil), cfg.StatusCodes...)
 
 	if cfg.MaxBodyBytes <= 0 {
 		return s, errors.New("maxBodyBytes must be positive")
+	}
+	if cfg.MaxBodyBytes > maxValueBytes {
+		return s, fmt.Errorf("maxBodyBytes must not exceed %d, the largest value Redis takes", maxValueBytes)
 	}
 	s.maxBodyBytes = cfg.MaxBodyBytes
 
