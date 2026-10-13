@@ -64,25 +64,27 @@ available in [`compose.yml`](compose.yml) and [`example/`](example).
 
 All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#ParseDuration) (`50ms`, `5m`, `1h`).
 
-| Key                           | Default                | Description                                                                                                                                    |
-|-------------------------------|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| `redis.dsn`                   | `redis://cache:6379/0` | `redis://[user[:password]@]host[:port][/db]`. TLS (`rediss://`) is not supported yet.                                                          |
-| `redis.poolSize`              | `10`                   | Connections to Redis, at most, for each middleware in each Traefik instance. A request that finds them all busy waits for one.                 |
-| `redis.dialTimeout`           | `50ms`                 | Maximum time to get a connection to Redis: a free one of the pool, or a new one. Past it, the cache is bypassed.                               |
-| `redis.timeout`               | `1s`                   | Maximum time for a whole Redis operation, getting the connection and transferring a body included. Past it, the cache is bypassed.             |
-| `redis.maxFailures`           | `5`                    | Failures in a row after which Redis is [no longer asked](#redis-failures). `0`: every request tries it.                                        |
-| `redis.retryAfter`            | `1s`                   | How often Redis is tried again once it is no longer asked.                                                                                     |
-| `statusCodes`                 | `[200]`                | Status codes allowed to be stored, at least one. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable.         |
-| `defaultTtl`                  | `5m`                   | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires`. `0` disables it.                                                       |
-| `staleTtl`                    | `1h`                   | How long an entry is kept in Redis after it expires: the upper bound of every [stale response](#stale-responses). `0` disables them.           |
-| `defaultStaleWhileRevalidate` | `0s`                   | `stale-while-revalidate` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                              |
-| `defaultStaleIfError`         | `0s`                   | `stale-if-error` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                                      |
-| `maxBodyBytes`                | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached. At most 512 MiB, the largest value Redis takes.                                    |
-| `maxVariants`                 | `16`                   | Stored [variants](#variants) per URL. `0`: responses with `Vary` are not cached.                                                          |
-| `maxRevalidations`            | `10`                   | [Background refreshes](#stale-responses) running at once, for each middleware in each Traefik instance.                                        |
-| `revalidationTimeout`         | `30s`                  | Maximum time of a background refresh.                                                                                                          |
-| `sortQuery`                   | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
-| `exposeKey`                   | `false`                | Add the [Redis key](#cacheable-responses) to the `Cache-Status` header (`key="…"`).                                                            |
+| Key                            | Default                | Description                                                                                                                                    |
+|--------------------------------|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| `redis.dsn`                    | `redis://cache:6379/0` | `redis://[user[:password]@]host[:port][/db]`, or `rediss://` for TLS: the certificate of Redis is then verified.                               |
+| `redis.tls.ca`                 | system authorities     | With `rediss://`, the authorities that may have signed the certificate of Redis: a PEM file, or its content.                                   |
+| `redis.tls.insecureSkipVerify` | `false`                | With `rediss://`, accept any certificate: the connection is encrypted, but Redis may be anyone.                                                |
+| `redis.poolSize`               | `10`                   | Connections to Redis, at most, for each middleware in each Traefik instance. A request that finds them all busy waits for one.                 |
+| `redis.dialTimeout`            | `50ms`                 | Maximum time to get a connection to Redis: a free one of the pool, or a new one. Past it, the cache is bypassed.                               |
+| `redis.timeout`                | `1s`                   | Maximum time for a whole Redis operation, getting the connection and transferring a body included. Past it, the cache is bypassed.             |
+| `redis.maxFailures`            | `5`                    | Failures in a row after which Redis is [no longer asked](#redis-failures). `0`: every request tries it.                                        |
+| `redis.retryAfter`             | `1s`                   | How often Redis is tried again once it is no longer asked.                                                                                     |
+| `statusCodes`                  | `[200]`                | Status codes allowed to be stored, at least one. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable.         |
+| `defaultTtl`                   | `5m`                   | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires`. `0` disables it.                                                       |
+| `staleTtl`                     | `1h`                   | How long an entry is kept in Redis after it expires: the upper bound of every [stale response](#stale-responses). `0` disables them.           |
+| `defaultStaleWhileRevalidate`  | `0s`                   | `stale-while-revalidate` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                              |
+| `defaultStaleIfError`          | `0s`                   | `stale-if-error` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                                      |
+| `maxBodyBytes`                 | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached. At most 512 MiB, the largest value Redis takes.                                    |
+| `maxVariants`                  | `16`                   | Stored [variants](#variants) per URL. `0`: responses with `Vary` are not cached.                                                               |
+| `maxRevalidations`             | `10`                   | [Background refreshes](#stale-responses) running at once, for each middleware in each Traefik instance.                                        |
+| `revalidationTimeout`          | `30s`                  | Maximum time of a background refresh.                                                                                                          |
+| `sortQuery`                    | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
+| `exposeKey`                    | `false`                | Add the [Redis key](#cacheable-responses) to the `Cache-Status` header (`key="…"`).                                                            |
 
 ## HTTP headers
 
@@ -300,8 +302,8 @@ A shared cache gives the response made for one client to all the others. The def
   bounds the number of URLs: a client can fill Redis with entries that nobody asks for again (flooding), which then take the place of the
   useful ones (pollution). Give Redis a `maxmemory` with the `allkeys-lfu` policy, so that entries requested once are evicted first, and
   have the backend refuse or redirect the URLs it does not know: with the default `statusCodes`, only a `200` is stored.
-- **Redis is trusted.** Whoever writes to it chooses what clients are served, whoever reads it gets the stored responses, and the connection
-  is not encrypted, password included: keep it on a private network, for the cache only.
+- **Redis is trusted.** Whoever writes to it chooses what clients are served, and whoever reads it gets the stored responses: keep it for
+  the cache only. With `redis://`, the connection is not encrypted, password included: keep it on a private network, or use `rediss://`.
 
 Hence the order of the middlewares of a router:
 

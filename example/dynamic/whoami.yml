@@ -63,6 +63,18 @@ http:
       middlewares:
         - whoami-key-tenant
       service: whoami
+    # TLS to Redis: here the cache is in `cache-tls`, whose certificate is verified with `redis.tls.ca`.
+    # /whoami-tls-untrusted has no `redis.tls.ca`: the certificate is refused and the cache bypassed
+    whoami-tls:
+      rule: PathPrefix(`/whoami-tls`)
+      middlewares:
+        - whoami-tls
+      service: whoami
+    whoami-tls-untrusted:
+      rule: PathPrefix(`/whoami-tls-untrusted`)
+      middlewares:
+        - whoami-tls-untrusted
+      service: whoami
     whoami:
       rule: PathPrefix(`/whoami`)
       service: whoami
@@ -128,6 +140,18 @@ http:
           redis:
             dsn: "redis://cache:6379/2"
           exposeKey: true
+    whoami-tls:
+      plugin:
+        traedis:
+          redis:
+            dsn: "rediss://cache-tls:6379/0"
+            tls:
+              ca: /certs/redis.crt # self-signed: not one of the authorities of the system
+    whoami-tls-untrusted:
+      plugin:
+        traedis:
+          redis:
+            dsn: "rediss://cache-tls:6379/0"
     whoami-stale-default:
       plugin:
         traedis:

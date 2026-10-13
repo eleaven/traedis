@@ -5,7 +5,7 @@
 #   - "k6": load.js, HTTP load through Traefik: each sample backend without the
 #     cache (direct) and with it (hit, miss).
 #
-#   docker compose up -d --wait ingress cache whoami placeholder imaging
+#   docker compose up -d --wait ingress cache cache-tls whoami placeholder imaging
 #   ./benchmark/run.sh
 #
 # BENCH (.) and BENCHTIME (2s) are passed to -bench and -benchtime; LOAD_VUS (10)

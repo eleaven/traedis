@@ -46,8 +46,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      # --wait: until healthy (ingress, cache, whoami, imaging) or running (placeholder has no healthcheck)
-      - run: docker compose up -d --wait --wait-timeout 120 ingress cache whoami placeholder imaging
+      # --wait: until healthy (ingress, cache, cache-tls, whoami, imaging) or running (placeholder has no healthcheck)
+      - run: docker compose up -d --wait --wait-timeout 120 ingress cache cache-tls whoami placeholder imaging
       - run: ./e2e/run.sh
       - name: Report
         if: ${{ !cancelled() }}
@@ -69,7 +69,7 @@ jobs:
         with:
           go-version: "1.26"
       - run: go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1
-      - run: docker compose up -d --wait --wait-timeout 120 ingress cache whoami placeholder imaging
+      - run: docker compose up -d --wait --wait-timeout 120 ingress cache cache-tls whoami placeholder imaging
       - run: ./benchmark/run.sh
       # Not on failure: there is no results.json then
       - name: Report

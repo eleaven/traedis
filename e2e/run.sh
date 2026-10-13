@@ -3,7 +3,7 @@
 # sample backends of compose.yml. Hurl (compose service `hurl`) runs the *.hurl
 # files, in phases: it cannot stop Redis itself.
 #
-#   docker compose up -d --wait ingress cache whoami placeholder imaging
+#   docker compose up -d --wait ingress cache cache-tls whoami placeholder imaging
 #   ./e2e/run.sh
 #
 # The results are also written to e2e/junit.xml (see summary.mjs).

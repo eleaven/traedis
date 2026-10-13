@@ -103,7 +103,46 @@ func TestParseConfig(t *testing.T) {
 				}
 			},
 		},
-		{name: "dsn scheme must be redis", mutate: func(c *Config) { c.Redis.DSN = "rediss://cache:6379" }, wantErr: "scheme"},
+		{name: "dsn scheme must be redis or rediss", mutate: func(c *Config) { c.Redis.DSN = "http://cache:6379" }, wantErr: "scheme"},
+		{
+			name:   "redis:// is not encrypted",
+			mutate: func(c *Config) { c.Redis.DSN = "redis://cache" },
+			check: func(t *testing.T, s settings) {
+				if s.redis.tls != nil {
+					t.Errorf("tls = %+v", s.redis.tls)
+				}
+			},
+		},
+		{
+			name:   "rediss:// verifies the certificate with the system authorities",
+			mutate: func(c *Config) { c.Redis.DSN = "rediss://user:s3cret@Redis.example/1" },
+			check: func(t *testing.T, s settings) {
+				o := s.redis
+				if o.addr != "Redis.example:6379" || o.password != "s3cret" || o.db != 1 {
+					t.Errorf("redis = %+v", o)
+				}
+				if o.tls == nil || o.tls.ServerName != "Redis.example" || o.tls.RootCAs != nil || o.tls.InsecureSkipVerify {
+					t.Errorf("tls = %+v", o.tls)
+				}
+			},
+		},
+		{
+			name:   "redis.tls.insecureSkipVerify",
+			mutate: func(c *Config) { c.Redis.DSN = "rediss://cache"; c.Redis.TLS.InsecureSkipVerify = true },
+			check: func(t *testing.T, s settings) {
+				if s.redis.tls == nil || !s.redis.tls.InsecureSkipVerify {
+					t.Errorf("tls = %+v", s.redis.tls)
+				}
+			},
+		},
+		{name: "redis.tls.ca without rediss://", mutate: func(c *Config) { c.Redis.TLS.CA = "/certs/ca.crt" }, wantErr: "redis.tls"},
+		{name: "redis.tls.insecureSkipVerify without rediss://", mutate: func(c *Config) { c.Redis.TLS.InsecureSkipVerify = true }, wantErr: "redis.tls"},
+		{name: "redis.tls.ca file not found", mutate: func(c *Config) { c.Redis.DSN = "rediss://cache"; c.Redis.TLS.CA = "/no/such/ca.crt" }, wantErr: "redis.tls.ca"},
+		{
+			name:    "redis.tls.ca without certificate",
+			mutate:  func(c *Config) { c.Redis.DSN = "rediss://cache"; c.Redis.TLS.CA = "-----BEGIN CERTIFICATE-----\n" },
+			wantErr: "redis.tls.ca: no certificate found",
+		},
 		{name: "dsn missing host", mutate: func(c *Config) { c.Redis.DSN = "redis:///0" }, wantErr: "host"},
 		{name: "dsn invalid database", mutate: func(c *Config) { c.Redis.DSN = "redis://cache/abc" }, wantErr: "database"},
 		{
@@ -151,7 +190,7 @@ func TestParseConfig(t *testing.T) {
 
 func TestParseDSNErrorsDoNotLeakCredentials(t *testing.T) {
 	for _, dsn := range []string{
-		"rediss://user:s3cret@cache",
+		"http://user:s3cret@cache",
 		"redis://user:s3cret@cache/x",
 		"redis://user:s3cret@cache:port",
 		"redis://user:s3cret@[::1",
@@ -176,6 +215,7 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.Redis.Timeout = "1s"
 	cfg.Redis.MaxFailures = 5
 	cfg.Redis.RetryAfter = "1s"
+	cfg.Redis.TLS = RedisTLSConfig{CA: "", InsecureSkipVerify: false}
 	cfg.StatusCodes = []int{200}
 	cfg.DefaultTTL = "5m"
 	cfg.StaleTTL = "1h"

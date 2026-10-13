@@ -2,11 +2,14 @@
 package traedis
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -41,6 +44,16 @@ type RedisConfig struct {
 	Timeout     string `json:"timeout,omitempty"`
 	MaxFailures int    `json:"maxFailures,omitempty"`
 	RetryAfter  string `json:"retryAfter,omitempty"`
+	// TLS only applies to a rediss:// DSN.
+	TLS RedisTLSConfig `json:"tls,omitempty"`
+}
+
+// RedisTLSConfig tells how the certificate of Redis is verified.
+type RedisTLSConfig struct {
+	// CA is a PEM file, or its content: the authorities that may have signed
+	// the certificate, in place of those of the system.
+	CA                 string `json:"ca,omitempty"`
+	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
 }
 
 // CreateConfig returns the default configuration (documented in the README).
@@ -97,6 +110,9 @@ type redisOptions struct {
 	username string
 	password string
 	db       int
+	// tls is set for a rediss:// DSN: connections are encrypted, and the
+	// certificate of Redis verified with it.
+	tls *tls.Config
 	// poolSize is the number of connections, at most.
 	poolSize int
 	// dialTimeout bounds getting a connection, a free one of the pool or a new
@@ -117,6 +133,9 @@ func parseConfig(cfg *Config) (settings, error) {
 
 	redis, err := parseDSN(cfg.Redis.DSN)
 	if err != nil {
+		return s, err
+	}
+	if err := setTLS(&redis, cfg.Redis.TLS); err != nil {
 		return s, err
 	}
 	if redis.dialTimeout, err = parseDuration("redis.dialTimeout", cfg.Redis.DialTimeout); err != nil {
@@ -229,19 +248,48 @@ func parseDuration(name, value string) (time.Duration, error) {
 	return d, nil
 }
 
-// parseDSN parses redis://[user[:password]@]host[:port][/db].
-// Errors never include the DSN itself, which may hold credentials.
+// setTLS applies redis.tls to the options of a rediss:// DSN.
+func setTLS(o *redisOptions, cfg RedisTLSConfig) error {
+	if o.tls == nil {
+		if cfg.CA != "" || cfg.InsecureSkipVerify {
+			return errors.New("redis.tls: the scheme of redis.dsn must be rediss://")
+		}
+		return nil
+	}
+	o.tls.InsecureSkipVerify = cfg.InsecureSkipVerify
+	if cfg.CA == "" {
+		return nil
+	}
+	pem := []byte(cfg.CA)
+	if !strings.Contains(cfg.CA, "-----BEGIN") {
+		var err error
+		if pem, err = os.ReadFile(cfg.CA); err != nil {
+			return fmt.Errorf("redis.tls.ca: %w", err)
+		}
+	}
+	o.tls.RootCAs = x509.NewCertPool()
+	if !o.tls.RootCAs.AppendCertsFromPEM(pem) {
+		return errors.New("redis.tls.ca: no certificate found")
+	}
+	return nil
+}
+
+// parseDSN parses redis://[user[:password]@]host[:port][/db], or rediss:// for
+// TLS. Errors never include the DSN itself, which may hold credentials.
 func parseDSN(dsn string) (redisOptions, error) {
 	var o redisOptions
 	u, err := url.Parse(strings.TrimSpace(dsn))
 	if err != nil {
 		return o, errors.New("redis.dsn: malformed URL")
 	}
-	if u.Scheme != "redis" {
-		return o, errors.New("redis.dsn: scheme must be redis://")
+	if u.Scheme != "redis" && u.Scheme != "rediss" {
+		return o, errors.New("redis.dsn: scheme must be redis:// or rediss://")
 	}
 	if u.Hostname() == "" {
 		return o, errors.New("redis.dsn: missing host")
+	}
+	if u.Scheme == "rediss" {
+		o.tls = &tls.Config{ServerName: u.Hostname(), MinVersion: tls.VersionTLS12}
 	}
 	port := u.Port()
 	if port == "" {

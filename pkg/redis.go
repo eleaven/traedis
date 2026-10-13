@@ -14,6 +14,7 @@ package traedis
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -378,13 +379,23 @@ func release(c *redisClient, conn *redisConn) {
 	<-c.sem
 }
 
-// dial opens a connection and sets it up (AUTH, SELECT), until the deadline of
-// ctx.
+// dial opens a connection and sets it up (TLS, AUTH, SELECT), until the
+// deadline of ctx.
 func (c *redisClient) dial(ctx context.Context) (*redisConn, error) {
 	var d net.Dialer
 	nc, err := d.DialContext(ctx, "tcp", c.opts.addr)
 	if err != nil {
 		return nil, err
+	}
+	if c.opts.tls != nil {
+		// Nothing is sent, the password least of all, before Redis is known to
+		// be the one that is meant.
+		secured := tls.Client(nc, c.opts.tls)
+		if err := secured.HandshakeContext(ctx); err != nil {
+			_ = nc.Close()
+			return nil, fmt.Errorf("redis: TLS: %w", err)
+		}
+		nc = secured
 	}
 	conn := &redisConn{nc: nc, r: bufio.NewReaderSize(nc, maxLineBytes)}
 

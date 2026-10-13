@@ -12,6 +12,9 @@ testData:
     timeout: 1s
     maxFailures: 5
     retryAfter: 1s
+    tls:
+      ca: ""
+      insecureSkipVerify: false
   statusCodes: [ 200 ]
   defaultTtl: 5m
   staleTtl: 1h

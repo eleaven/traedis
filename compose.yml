@@ -15,6 +15,10 @@ services:
       - ./example/traefik.yml:/etc/traefik/traefik.yml:ro
       - ./example/dynamic:/etc/traefik/dynamic:ro
       - .:/plugins-local/src/github.com/eleaven/traedis:ro
+      - certs:/certs:ro # `redis.tls.ca` of example/dynamic/whoami.yml
+    depends_on:
+      certs:
+        condition: service_completed_successfully
     develop:
       watch:
         - path: ./example/traefik.yml
@@ -46,6 +50,39 @@ services:
       interval: 2s
       timeout: 2s
       retries: 15
+
+  # Redis that only talks TLS, with the certificate that `certs` makes: exercises `rediss://` → http://localhost:8080/whoami-tls
+  cache-tls:
+    image: redis:8-alpine
+    command: >-
+      redis-server --port 0 --tls-port 6379 --tls-auth-clients no
+      --tls-cert-file /certs/redis.crt --tls-key-file /certs/redis.key
+      --maxmemory 64mb --maxmemory-policy allkeys-lfu
+    volumes:
+      - certs:/certs:ro
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+    healthcheck:
+      test: [ "CMD", "redis-cli", "--tls", "--cacert", "/certs/redis.crt", "-h", "cache-tls", "ping" ]
+      interval: 2s
+      timeout: 2s
+      retries: 15
+
+  # Makes the self-signed certificate of cache-tls, once, and exits: it is its own authority
+  certs:
+    image: alpine/openssl:latest
+    entrypoint: [ "sh", "-c" ]
+    command:
+      - >-
+        test -f /certs/redis.crt || {
+        openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650
+        -subj "/CN=cache-tls" -addext "subjectAltName=DNS:cache-tls"
+        -keyout /certs/redis.key -out /certs/redis.crt
+        && chmod 644 /certs/redis.key;
+        }
+    volumes:
+      - certs:/certs
 
   # Backend without Cache-Control: exercises `defaultTtl` → http://localhost:8080/whoami-cache (/whoami: without the cache),
   # stale responses → http://localhost:8080/whoami-stale and `Vary` → http://localhost:8080/whoami-vary
@@ -96,3 +133,4 @@ services:
 
 volumes:
   cache:
+  certs:

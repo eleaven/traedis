@@ -4,12 +4,17 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
+	"crypto/tls"
 	"encoding/hex"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,6 +56,28 @@ func newFakeRedis(t *testing.T, replies map[string]string) *fakeRedis {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return serveFakeRedis(t, ln, replies)
+}
+
+// newFakeRedisTLS is a fakeRedis that only talks TLS, and the PEM of the
+// authority of its certificate: the one of httptest, valid for 127.0.0.1 and
+// example.com.
+func newFakeRedisTLS(t *testing.T, replies map[string]string) (*fakeRedis, string) {
+	t.Helper()
+	srv := httptest.NewUnstartedServer(http.NotFoundHandler())
+	srv.StartTLS()
+	t.Cleanup(srv.Close)
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := &tls.Config{Certificates: srv.TLS.Certificates}
+	ca := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: srv.Certificate().Raw})
+	return serveFakeRedis(t, tls.NewListener(ln, config), replies), string(ca)
+}
+
+func serveFakeRedis(t *testing.T, ln net.Listener, replies map[string]string) *fakeRedis {
+	t.Helper()
 	all := map[string]string{}
 	for k, v := range defaultReplies {
 		all[k] = v
@@ -387,6 +414,94 @@ func TestRedisDialSendsAuthAndSelect(t *testing.T) {
 				t.Errorf("commands = %q, want %q", got, tt.want)
 			}
 		})
+	}
+}
+
+// tlsClient is a client of f configured as Traefik would: with a DSN for the
+// given host and redis.tls.
+func tlsClient(t *testing.T, f *fakeRedis, scheme, host string, tlsConfig RedisTLSConfig) *redisClient {
+	t.Helper()
+	_, port, err := net.SplitHostPort(f.ln.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := CreateConfig()
+	cfg.Redis.DSN = scheme + "://:s3cret@" + net.JoinHostPort(host, port)
+	cfg.Redis.DialTimeout = "500ms"
+	cfg.Redis.TLS = tlsConfig
+	s, err := parseConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return newRedisClient(s.redis, 1024)
+}
+
+func TestRedisTLS(t *testing.T) {
+	_, ca := newFakeRedisTLS(t, nil)
+	caFile := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(caFile, []byte(ca), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		scheme string
+		host   string
+		tls    RedisTLSConfig
+		ok     bool
+	}{
+		{name: "redis.tls.ca as a file", scheme: "rediss", host: "127.0.0.1", tls: RedisTLSConfig{CA: caFile}, ok: true},
+		{name: "redis.tls.ca as PEM", scheme: "rediss", host: "127.0.0.1", tls: RedisTLSConfig{CA: ca}, ok: true},
+		{name: "unknown authority", scheme: "rediss", host: "127.0.0.1"},
+		{name: "certificate of another host", scheme: "rediss", host: "localhost", tls: RedisTLSConfig{CA: ca}},
+		{name: "redis.tls.insecureSkipVerify", scheme: "rediss", host: "localhost", tls: RedisTLSConfig{InsecureSkipVerify: true}, ok: true},
+		{name: "redis:// to a Redis that wants TLS", scheme: "redis", host: "127.0.0.1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, _ := newFakeRedisTLS(t, nil)
+			c := tlsClient(t, f, tt.scheme, tt.host, tt.tls)
+			v, err := getField(c, "k", "")
+			if tt.ok {
+				if err != nil || string(v) != "hello" {
+					t.Fatalf("get() = %q, %v", v, err)
+				}
+				// Large values take another way to the connection.
+				body := strings.Repeat("0123456789abcdef", 4<<10)
+				if err := c.set(context.Background(), "k", fieldValues("", "entry", ":body", body), time.Second, false); err != nil {
+					t.Fatalf("set() = %v", err)
+				}
+				cmds := f.received()
+				if len(cmds) != 3 || strings.Join(cmds[0], " ") != "AUTH s3cret" || cmds[2][9] != body {
+					t.Errorf("commands = %.200q", cmds)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("expected an error")
+			}
+			// The password is not sent to a Redis that is not the right one.
+			if cmds := f.received(); len(cmds) != 0 {
+				t.Errorf("commands = %q, want none", cmds)
+			}
+			if len(c.sem) != 0 {
+				t.Errorf("pool tokens leaked: %d", len(c.sem))
+			}
+		})
+	}
+}
+
+// A Redis without TLS does not answer the handshake: no longer than
+// redis.dialTimeout.
+func TestRedisTLSToPlainRedis(t *testing.T) {
+	f := newFakeRedis(t, nil)
+	c := tlsClient(t, f, "rediss", "127.0.0.1", RedisTLSConfig{InsecureSkipVerify: true})
+	c.opts.dialTimeout = 100 * time.Millisecond
+	start := time.Now()
+	if _, err := getField(c, "k", ""); err == nil {
+		t.Fatal("expected an error")
+	}
+	if elapsed := time.Since(start); elapsed > 500*time.Millisecond {
+		t.Errorf("get() took %v, want at most redis.dialTimeout", elapsed)
 	}
 }
 

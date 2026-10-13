@@ -3,7 +3,7 @@ MAKEFLAGS += --no-print-directory
 .PHONY: help start stop reset unwatch test unit e2e bench bench-view assets
 
 # Services the tests and benchmarks need: the whole stack but Redis Insight
-TEST_STACK := ingress cache whoami placeholder imaging
+TEST_STACK := ingress cache cache-tls whoami placeholder imaging
 
 # Stops the containers when the recipe ends, even when it fails or on Ctrl-C (which /bin/sh only traps when told to)
 down_on_exit = trap 'docker compose down' EXIT; trap 'exit 1' INT TERM
