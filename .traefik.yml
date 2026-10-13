@@ -1,9 +1,9 @@
-displayName: Traedis
+displayName: 'Traedis – HTTP Cache on Redis'
 type: middleware
 iconPath: assets/icon.png
 import: github.com/eleaven/traedis/pkg
 basePkg: traedis
-summary: 'Redis-backed HTTP cache for Traefik'
+summary: 'RFC 9111 shared cache: Vary, ETag, stale-while-revalidate, fail-open'
 testData:
   redis:
     dsn: "redis://localhost:6379/0"
