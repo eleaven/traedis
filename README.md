@@ -1,9 +1,9 @@
-> [!WARNING]
-> **This project is in its early stages.** Use it at your own risk.
+> ⚠️ **This project is in its early stages.** Use it at your own risk.
 
 <!-- The Traefik Plugin Catalog shows this file on another site, where it rewrites every https://github.com/ link to
      raw.githubusercontent.com. So the links are absolute: to a file through /blob/, which that turns into the file itself, and to
-     anything else (a directory, a workflow) through www.github.com, which it leaves alone -->
+     anything else (a directory, a workflow) through www.github.com, which it leaves alone. It does not know the alerts of GitHub
+     either (`> [!NOTE]`), which it shows as they are written -->
 <!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
   <img src="https://raw.githubusercontent.com/eleaven/traedis/main/assets/icon.svg" alt="Traedis Logo" height="360">
@@ -211,10 +211,9 @@ that accepts that coding.
   `Accept-Encoding` cannot make browsers get it.
 - A response with `Vary: Accept-Encoding` and another `Content-Encoding`, or several, is not cached.
 
-> [!NOTE]
-> Traefik's `compress` middleware only adds `Vary: Accept-Encoding` to the responses it compresses: placed after the cache, its uncompressed
-> response has no `Vary` and is served to everyone. Put `compress` before the cache, or set `Vary: Accept-Encoding` on every response with a
-> `headers` middleware, as [`example/dynamic/whoami.yml`][whoami] does.
+> **Note:** Traefik's `compress` middleware only adds `Vary: Accept-Encoding` to the responses it compresses: placed after the cache, its
+> uncompressed response has no `Vary` and is served to everyone. Put `compress` before the cache, or set `Vary: Accept-Encoding` on every
+> response with a `headers` middleware, as [`example/dynamic/whoami.yml`][whoami] does.
 
 ### Conditional requests
 
