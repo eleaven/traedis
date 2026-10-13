@@ -348,7 +348,7 @@ func isHit(status string) bool {
 // storedMarker returns the marker of varyURL.
 func storedMarker(t *testing.T, st *memStore) marker {
 	t.Helper()
-	v, _ := st.lookup(redisKey(varyURL), "")
+	v, _ := st.lookup(cacheKey(varyURL), "")
 	m, ok := decodeMarker(v.value)
 	if !ok {
 		t.Fatalf("field \"\" must hold a marker, got %q", v.value)
@@ -394,7 +394,7 @@ func TestVariants(t *testing.T) {
 
 	// One hash per URI: the marker in field "", two fields per variant (its
 	// entry and its body).
-	key := redisKey(varyURL)
+	key := cacheKey(varyURL)
 	if m := storedMarker(t, st); !sameStrings(m.names, []string{"Accept-Language"}) || len(m.codings) != 0 {
 		t.Errorf("marker = %+v", m)
 	}
@@ -494,7 +494,7 @@ func TestVariantsByContentCoding(t *testing.T) {
 	if b.calls != 3 {
 		t.Errorf("backend calls = %d, want one per content coding", b.calls)
 	}
-	if n, _ := st.count(context.Background(), redisKey(varyURL)); n != 7 {
+	if n, _ := st.count(context.Background(), cacheKey(varyURL)); n != 7 {
 		t.Errorf("fields = %d, want the marker and the 2 fields of 3 variants: clients cannot make variants", n)
 	}
 	if b.lastReq.Header.Get("Accept-Encoding") != "" {
@@ -554,7 +554,7 @@ func TestUncompressedVariant(t *testing.T) {
 				t.Errorf("step %d (Accept-Encoding %q): Cache-Status = %q, want hit = %v", i, step.accept, lastCacheStatus(rec), step.hit)
 			}
 		}
-		if n, _ := st.count(context.Background(), redisKey(varyURL)); n != 3 || b.calls != 3 {
+		if n, _ := st.count(context.Background(), cacheKey(varyURL)); n != 3 || b.calls != 3 {
 			t.Errorf("fields = %d, backend calls = %d: want the marker and one variant, stored 3 times", n, b.calls)
 		}
 	})
@@ -570,7 +570,7 @@ func TestOutdatedCodingIsUnlisted(t *testing.T) {
 		wantStatus string
 	}{
 		{name: "variant expired in Redis", wantStatus: varyMiss, outdate: func(t *testing.T, st *memStore, field string) {
-			if err := st.del(context.Background(), redisKey(varyURL), []string{field, bodyField(field)}); err != nil {
+			if err := st.del(context.Background(), cacheKey(varyURL), []string{field, bodyField(field)}); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -582,7 +582,7 @@ func TestOutdatedCodingIsUnlisted(t *testing.T) {
 				vary:        http.Header{"Accept-Encoding": {"zstd,br"}},
 				requestTime: at, responseTime: at,
 			}
-			if err := st.put(redisKey(varyURL), field, e, nil, time.Hour); err != nil {
+			if err := st.put(cacheKey(varyURL), field, e, nil, time.Hour); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -648,7 +648,7 @@ func TestVariantsAreCapped(t *testing.T) {
 		t.Run("maxVariants "+strconv.Itoa(limit), func(t *testing.T) {
 			b := &negotiator{vary: "Accept-Language"}
 			c, st := newTestCache(t, b, func(cfg *Config) { cfg.MaxVariants = limit })
-			key := redisKey(varyURL)
+			key := cacheKey(varyURL)
 			lang := func(i int) http.Header {
 				return http.Header{"Accept-Language": {"l" + strconv.Itoa(i)}}
 			}
@@ -817,7 +817,7 @@ func TestVaryChanges(t *testing.T) {
 // Stored data is untrusted: what is not the variant of the request is a miss.
 func TestUntrustedVariant(t *testing.T) {
 	fr := http.Header{"Accept-Language": {"fr"}}
-	key := redisKey(varyURL)
+	key := cacheKey(varyURL)
 	field := variantField([]string{"Accept-Language"}, fr, "")
 	now := time.Now()
 	tests := []struct {
@@ -935,7 +935,7 @@ func TestSaveVariantStopsOnRedisError(t *testing.T) {
 			tt.fail(st)
 
 			v := variant{names: []string{"Accept-Encoding"}, field: "f", coding: "br", accepted: []string{"br"}}
-			stored := c.put(context.Background(), redisKey(varyURL), v, []fieldValue{{name: "f", value: []byte("data")}}, time.Minute)
+			stored := c.put(context.Background(), cacheKey(varyURL), v, []fieldValue{{name: "f", value: []byte("data")}}, time.Minute)
 			if stored || st.sets != 0 {
 				t.Error("nothing must be written to a failing Redis")
 			}
@@ -947,7 +947,7 @@ func TestStaleVariantIsRevalidated(t *testing.T) {
 	b := &negotiator{vary: "Accept-Language, Accept-Encoding", codings: []string{"gzip"}}
 	c, st := newTestCache(t, b, nil)
 	names := []string{"Accept-Encoding", "Accept-Language"}
-	key := redisKey(varyURL)
+	key := cacheKey(varyURL)
 	at := time.Now().Add(-70 * time.Second)
 	stale := func(lang string) (string, *entry) {
 		e := &entry{
@@ -999,7 +999,7 @@ func TestSupersededVariantIsDeleted(t *testing.T) {
 	b := &backend{header: http.Header{"Cache-Control": {"no-store"}}, body: "hello"}
 	c, st := newTestCache(t, b, nil)
 	names := []string{"Accept-Language"}
-	key := redisKey(varyURL)
+	key := cacheKey(varyURL)
 	at := time.Now().Add(-70 * time.Second)
 	mk := encodeMarker(marker{names: names})
 	fields := map[string]string{}
@@ -1050,7 +1050,7 @@ func TestStaleIfErrorServesTheVariant(t *testing.T) {
 		requestTime: at, responseTime: at,
 	}
 	mk := encodeMarker(marker{names: names})
-	if err := st.put(redisKey(varyURL), variantField(names, fr, ""), e, mk, time.Hour); err != nil {
+	if err := st.put(cacheKey(varyURL), variantField(names, fr, ""), e, mk, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1070,7 +1070,7 @@ func TestVariantIsReadInOneRoundTrip(t *testing.T) {
 	b := &negotiator{vary: "Accept-Language"}
 	c, st := newTestCache(t, b, nil)
 	fr := http.Header{"Accept-Language": {"fr"}}
-	key := redisKey(varyURL)
+	key := cacheKey(varyURL)
 	field := variantField([]string{"Accept-Language"}, fr, "")
 	guessed := []string{"", field, bodyField(field)}
 	unknown := []string{"", bodyField("")}

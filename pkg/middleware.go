@@ -16,7 +16,9 @@ const entryOverhead = 1 << 20
 
 // cache is the middleware handler.
 type cache struct {
-	next    http.Handler
+	next http.Handler
+	// name is the one Traefik gives the middleware ("cache@file"): part of its
+	// Redis keys (see redisKey).
 	name    string
 	cfg     settings
 	store   store
@@ -58,7 +60,7 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	key := redisKey(cacheURI(r, c.cfg.sortQuery))
+	key := redisKey(c.name, cacheURI(r, c.cfg.sortQuery))
 	status := cacheStatus{}
 	if c.cfg.exposeKey {
 		status.key = key

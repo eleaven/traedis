@@ -220,15 +220,15 @@ func TestRevalidationOutcome(t *testing.T) {
 			if replaced := st.sets == 2; replaced != tt.replaced {
 				t.Errorf("replaced = %v, want %v", replaced, tt.replaced)
 			}
-			_, kept := st.lookup(redisKey(staleURL), "")
+			_, kept := st.lookup(cacheKey(staleURL), "")
 			if kept == tt.deleted {
 				t.Errorf("deleted = %v, want %v", !kept, tt.deleted)
 			}
-			if _, bodyKept := st.lookup(redisKey(staleURL), bodyField("")); bodyKept != kept {
+			if _, bodyKept := st.lookup(cacheKey(staleURL), bodyField("")); bodyKept != kept {
 				t.Errorf("body kept = %v, entry kept = %v: they go together", bodyKept, kept)
 			}
 			if kept {
-				e := st.entry(redisKey(staleURL), "")
+				e := st.entry(cacheKey(staleURL), "")
 				if e == nil {
 					t.Fatal("field \"\" must hold an entry")
 				}
@@ -325,7 +325,7 @@ func TestRevalidationPanicIsRecovered(t *testing.T) {
 		t.Fatalf("got %q", rec.Body.String())
 	}
 	waitRevalidations(t, c)
-	if _, kept := st.lookup(redisKey(staleURL), ""); !kept || st.sets != 1 {
+	if _, kept := st.lookup(cacheKey(staleURL), ""); !kept || st.sets != 1 {
 		t.Error("the entry must be left as it was")
 	}
 }
@@ -364,7 +364,7 @@ func TestIncompleteResponseIsNotStored(t *testing.T) {
 			front := httptest.NewServer(c)
 			defer front.Close()
 			uri := front.URL + "/a"
-			key := redisKey(uri)
+			key := cacheKey(uri)
 
 			if resp, err := http.Get(uri); err == nil {
 				_, _ = io.Copy(io.Discard, resp.Body)

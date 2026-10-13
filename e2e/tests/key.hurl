@@ -62,3 +62,22 @@ Host: other.example
 HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss"
+
+# The key has the name of the middleware: two middlewares on the way to the same URL don't share what they store
+GET {{base_url}}/whoami-key?run={{run}}
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss"
+header "Cache-Status" matches /key="traedis:whoami-key@file:[0-9a-f]{32}"/
+
+GET {{base_url}}/whoami-key?run={{run}}
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; hit"
+
+GET {{base_url}}/whoami-key?run={{run}}
+X-Tenant: b
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss"
+header "Cache-Status" matches /key="traedis:whoami-key-tenant@file:[0-9a-f]{32}"/

@@ -51,6 +51,18 @@ http:
       middlewares:
         - whoami-sort-query
       service: whoami
+    # Middleware names: here two routers match the same URL, each with a middleware of its own. Their responses
+    # are stored apart: `curl -H 'X-Tenant: b' http://localhost:8080/whoami-key` never gets those of the other one
+    whoami-key:
+      rule: PathPrefix(`/whoami-key`)
+      middlewares:
+        - whoami-key
+      service: whoami
+    whoami-key-tenant:
+      rule: PathPrefix(`/whoami-key`) && Header(`X-Tenant`, `b`)
+      middlewares:
+        - whoami-key-tenant
+      service: whoami
     whoami:
       rule: PathPrefix(`/whoami`)
       service: whoami
@@ -104,6 +116,18 @@ http:
           redis:
             dsn: "redis://cache:6379/2"
           sortQuery: true # off by default: for RFC 9111, these are two URLs
+    whoami-key:
+      plugin:
+        traedis:
+          redis:
+            dsn: "redis://cache:6379/2"
+          exposeKey: true # the Redis key in `Cache-Status`: it starts with the name of the middleware
+    whoami-key-tenant:
+      plugin:
+        traedis:
+          redis:
+            dsn: "redis://cache:6379/2"
+          exposeKey: true
     whoami-stale-default:
       plugin:
         traedis:

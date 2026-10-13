@@ -77,8 +77,9 @@ func paramName(p string) string {
 	return p
 }
 
-// redisKey returns the Redis key of a URI. This format is stable: changing it
-// invalidates the cache.
-func redisKey(uri string) string {
-	return keyPrefix + hashHex(uri)
+// redisKey returns the Redis key of a URI for the middleware of the given
+// name: each middleware has its own stored responses, whatever the database
+// they are in. This format is stable: changing it invalidates the cache.
+func redisKey(name, uri string) string {
+	return keyPrefix + name + ":" + hashHex(uri)
 }

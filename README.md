@@ -75,7 +75,7 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `maxBodyBytes`                | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached. At most 512 MiB, the largest value Redis takes.                                    |
 | `maxVariants`                 | `16`                   | Stored [variants](#variants) per URL. `0`: responses with `Vary` are not cached.                                                          |
 | `sortQuery`                   | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
-| `exposeKey`                   | `false`                | Add the Redis key to the `Cache-Status` header (`key="…"`).                                                                                    |
+| `exposeKey`                   | `false`                | Add the [Redis key](#cacheable-responses) to the `Cache-Status` header (`key="…"`).                                                            |
 
 ## HTTP headers
 
@@ -155,7 +155,7 @@ Traedis adds these to the responses it sends to the client, and to the requests 
 
 ### Cacheable responses
 
-Responses are stored by URL (scheme, host, path and query), and only when all of the following hold:
+Responses are stored by middleware and by URL (scheme, host, path and query), and only when all of the following hold:
 
 - the request is a `GET` (a `HEAD` is answered from the stored `GET`);
 - its status is listed in `statusCodes`;
@@ -165,6 +165,10 @@ Responses are stored by URL (scheme, host, path and query), and only when all of
 
 `OPTIONS`, `TRACE`, WebSocket upgrades and `Accept: text/event-stream` requests are forwarded as is. So are unsafe methods (`POST`, `PUT`,
 `DELETE`…), which [invalidate](#invalidation-by-unsafe-methods) what is stored.
+
+The Redis key is `traedis:<middleware>:<hash of the URL>`, with the name Traefik gives the middleware (`cache@file`). The routers that use
+the same middleware share its stored responses, in all the Traefik instances; two middlewares never do, even in the same Redis database
+and for the same URL: renaming a middleware starts it with an empty cache.
 
 ### Variants
 
@@ -249,8 +253,8 @@ When the backend answers a request with an unsafe method (any method that is not
 - They are removed before the client gets the answer: its next `GET` is not served what was stored before. The answer itself is never held
   back.
 - An error (`4xx`, `5xx`) changes nothing: the stored responses are kept, also for `stale-if-error`.
-- Only the URL of the request is invalidated, query included: `POST /cart/add` does not invalidate `/cart`, and the `Location` and
-  `Content-Location` of the response are not followed.
+- Only the URL of the request is invalidated, query included, and only for the middleware the request goes through: `POST /cart/add`
+  does not invalidate `/cart`, and the `Location` and `Content-Location` of the response are not followed.
 - There is no guarantee: if Redis cannot be reached at that moment, the stored responses stay until they expire, and a `GET` that was
   already on its way to the backend can store its response after the invalidation.
 

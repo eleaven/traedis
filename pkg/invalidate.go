@@ -20,7 +20,7 @@ func safeMethod(method string) bool {
 // invalidate proxies an unsafe request. A non-error response invalidates the
 // stored responses of its target URI (§4.4): the whole URI key.
 func (c *cache) invalidate(w http.ResponseWriter, r *http.Request) {
-	key := redisKey(cacheURI(r, c.cfg.sortQuery))
+	key := redisKey(c.name, cacheURI(r, c.cfg.sortQuery))
 	iw := &invalidator{
 		rw:     w,
 		store:  c.store,

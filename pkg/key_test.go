@@ -56,8 +56,8 @@ func TestCacheURIIgnoresMethod(t *testing.T) {
 
 // The key format is stable: a change invalidates every cached entry.
 func TestRedisKeyIsStable(t *testing.T) {
-	got := redisKey("http://example.com/path?a=1&b=2")
-	want := "traedis:29846eb9ec45655b03283e847145495f"
+	got := redisKey("cache@file", "http://example.com/path?a=1&b=2")
+	want := "traedis:cache@file:29846eb9ec45655b03283e847145495f"
 	if got != want {
 		t.Errorf("redisKey() = %q, want %q", got, want)
 	}

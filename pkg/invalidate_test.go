@@ -67,7 +67,7 @@ func TestInvalidation(t *testing.T) {
 			storeFresh(t, st, "http://example.com/items/1")
 			storeFresh(t, st, "http://example.com/items/2")
 			// A variant of the target URI, in the same key.
-			if err := st.putRaw(redisKey(invalidatedURL), "variant", []byte("v")); err != nil {
+			if err := st.putRaw(cacheKey(invalidatedURL), "variant", []byte("v")); err != nil {
 				t.Fatal(err)
 			}
 
@@ -78,13 +78,13 @@ func TestInvalidation(t *testing.T) {
 			if tt.status != 204 && tt.status != 304 && rec.Body.String() != "done" {
 				t.Errorf("body = %q", rec.Body.String())
 			}
-			_, kept := st.lookup(redisKey(invalidatedURL), "")
-			_, variantKept := st.lookup(redisKey(invalidatedURL), "variant")
+			_, kept := st.lookup(cacheKey(invalidatedURL), "")
+			_, variantKept := st.lookup(cacheKey(invalidatedURL), "variant")
 			if kept == tt.wantInvalidated || variantKept == tt.wantInvalidated {
 				t.Errorf("§4.4 stored responses of the target URI kept = %v, %v; want invalidated = %v", kept, variantKept, tt.wantInvalidated)
 			}
 			for _, other := range []string{"http://example.com/items/1", "http://example.com/items/2"} {
-				if _, ok := st.lookup(redisKey(other), ""); !ok {
+				if _, ok := st.lookup(cacheKey(other), ""); !ok {
 					t.Errorf("%s is another URI: it must be kept", other)
 				}
 			}
@@ -117,12 +117,12 @@ func TestInvalidationThenMiss(t *testing.T) {
 	}
 
 	rec := doRequest(c, http.MethodPost, testURL, nil)
-	want := `traedis; fwd=method; fwd-status=200; key="` + redisKey(testURL) + `"; detail=invalidated`
+	want := `traedis; fwd=method; fwd-status=200; key="` + cacheKey(testURL) + `"; detail=invalidated`
 	if lastCacheStatus(rec) != want {
 		t.Errorf("Cache-Status = %q, want %q", lastCacheStatus(rec), want)
 	}
 	rec = doRequest(c, http.MethodGet, testURL, nil)
-	if b.calls != 3 || lastCacheStatus(rec) != `traedis; fwd=uri-miss; fwd-status=200; key="`+redisKey(testURL)+`"` {
+	if b.calls != 3 || lastCacheStatus(rec) != `traedis; fwd=uri-miss; fwd-status=200; key="`+cacheKey(testURL)+`"` {
 		t.Errorf("§4.4 the next GET must be a miss: %q (backend calls %d)", lastCacheStatus(rec), b.calls)
 	}
 }
@@ -132,11 +132,11 @@ func TestInvalidationBeforeResponse(t *testing.T) {
 	c, st := newTestCache(t, nil, nil)
 	storeFresh(t, st, "http://example.com/a")
 	c.next = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		if _, kept := st.lookup(redisKey("http://example.com/a"), ""); !kept {
+		if _, kept := st.lookup(cacheKey("http://example.com/a"), ""); !kept {
 			t.Error("nothing must be invalidated before the backend answers")
 		}
 		w.WriteHeader(http.StatusNoContent)
-		if _, kept := st.lookup(redisKey("http://example.com/a"), ""); kept {
+		if _, kept := st.lookup(cacheKey("http://example.com/a"), ""); kept {
 			t.Error("§4.4 the key must be deleted when the status is received")
 		}
 	})

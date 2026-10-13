@@ -52,6 +52,11 @@ func newTestCache(t *testing.T, b http.Handler, mutate func(*Config)) (*cache, *
 	return newCache(b, "cache", s, st), st
 }
 
+// cacheKey returns the Redis key of a URI for the cache of newTestCache.
+func cacheKey(uri string) string {
+	return redisKey("cache", uri)
+}
+
 func doRequest(h http.Handler, method, target string, hdr http.Header) *httptest.ResponseRecorder {
 	req := httptest.NewRequest(method, target, nil)
 	for k, v := range hdr {
@@ -95,7 +100,7 @@ func TestMissThenHit(t *testing.T) {
 	if got := lastCacheStatus(first); got != "traedis; fwd=uri-miss; fwd-status=200" {
 		t.Errorf("miss Cache-Status = %q", got)
 	}
-	v, ok := st.lookup(redisKey(testURL), "")
+	v, ok := st.lookup(cacheKey(testURL), "")
 	if !ok {
 		t.Fatal("response not stored")
 	}
@@ -124,7 +129,7 @@ func TestMissThenHit(t *testing.T) {
 
 func storeEntry(t *testing.T, st *memStore, uri string, e *entry) {
 	t.Helper()
-	if err := st.put(redisKey(uri), "", e, nil, time.Hour); err != nil {
+	if err := st.put(cacheKey(uri), "", e, nil, time.Hour); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -511,7 +516,7 @@ func TestStaleIfErrorAfterStaleWhileRevalidate(t *testing.T) {
 func TestCorruptEntryIsAMiss(t *testing.T) {
 	b := cacheableBackend()
 	c, st := newTestCache(t, b, nil)
-	if err := st.putRaw(redisKey("http://example.com/a"), "", []byte(entryVersion+"garbage")); err != nil {
+	if err := st.putRaw(cacheKey("http://example.com/a"), "", []byte(entryVersion+"garbage")); err != nil {
 		t.Fatal(err)
 	}
 	rec := doRequest(c, http.MethodGet, "http://example.com/a", nil)
@@ -624,7 +629,7 @@ func TestDefaultTTLWithoutExplicitFreshness(t *testing.T) {
 	if rec.Header().Get("Cache-Control") != "" {
 		t.Error("Cache-Control must never be rewritten")
 	}
-	if v, _ := st.lookup(redisKey(testURL), ""); !closeTo(v.ttl, 5*time.Minute+time.Hour) {
+	if v, _ := st.lookup(cacheKey(testURL), ""); !closeTo(v.ttl, 5*time.Minute+time.Hour) {
 		t.Errorf("ttl = %v", v.ttl)
 	}
 }
@@ -647,7 +652,7 @@ func TestExposeKey(t *testing.T) {
 	b := cacheableBackend()
 	c, _ := newTestCache(t, b, func(cfg *Config) { cfg.ExposeKey = true })
 	rec := doRequest(c, http.MethodGet, testURL, nil)
-	want := `key="` + redisKey(testURL) + `"`
+	want := `key="` + cacheKey(testURL) + `"`
 	if !strings.Contains(lastCacheStatus(rec), want) {
 		t.Errorf("Cache-Status = %q, want it to contain %s", lastCacheStatus(rec), want)
 	}
@@ -655,6 +660,29 @@ func TestExposeKey(t *testing.T) {
 	c, _ = newTestCache(t, b, nil)
 	if rec := doRequest(c, http.MethodGet, testURL, nil); strings.Contains(lastCacheStatus(rec), "key=") {
 		t.Error("the key must not be exposed by default")
+	}
+}
+
+// Two middlewares may be on the way to the same URL (another entry point, a
+// rule on a header…): what one stores is not what the other one serves.
+func TestMiddlewaresDoNotShareEntries(t *testing.T) {
+	b := cacheableBackend()
+	first, st := newTestCache(t, b, nil)
+	doRequest(first, http.MethodGet, testURL, nil)
+
+	other := newCache(b, "other", first.cfg, st)
+	if rec := doRequest(other, http.MethodGet, testURL, nil); lastCacheStatus(rec) != "traedis; fwd=uri-miss; fwd-status=200" {
+		t.Errorf("another middleware: Cache-Status = %q", lastCacheStatus(rec))
+	}
+	// The same one in another Traefik instance.
+	replica := newCache(b, first.name, first.cfg, st)
+	if rec := doRequest(replica, http.MethodGet, testURL, nil); !strings.HasPrefix(lastCacheStatus(rec), "traedis; hit") {
+		t.Errorf("the same middleware: Cache-Status = %q", lastCacheStatus(rec))
+	}
+	// An unsafe request only invalidates what its own middleware stored.
+	doRequest(other, http.MethodPost, testURL, nil)
+	if rec := doRequest(first, http.MethodGet, testURL, nil); !strings.HasPrefix(lastCacheStatus(rec), "traedis; hit") {
+		t.Errorf("after the POST of another middleware: Cache-Status = %q", lastCacheStatus(rec))
 	}
 }
 
@@ -857,7 +885,7 @@ func (s *changingStore) get(ctx context.Context, key string, fields []string) ([
 
 // The body read after its entry must be the one of that entry.
 func TestBodyOfAnotherResponseIsNotServed(t *testing.T) {
-	key := redisKey(testURL)
+	key := cacheKey(testURL)
 	tests := []struct {
 		name   string
 		change func(st *memStore)
@@ -913,7 +941,7 @@ func TestStaleIfErrorReadsTheBody(t *testing.T) {
 		c, st := newTestCache(t, b, nil)
 		storeAged(t, st, "max-age=60, stale-if-error=300", 2*time.Minute)
 		if gone {
-			if err := st.del(context.Background(), redisKey(staleURL), []string{bodyField("")}); err != nil {
+			if err := st.del(context.Background(), cacheKey(staleURL), []string{bodyField("")}); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -934,7 +962,7 @@ func TestFreshnessIsStoredWithTheEntry(t *testing.T) {
 	b := &backend{header: http.Header{"Cache-Control": {"max-age=60"}, "Age": {"10"}}, body: "hello"}
 	c, st := newTestCache(t, b, nil)
 	doRequest(c, http.MethodGet, testURL, nil)
-	e := st.entry(redisKey(testURL), "")
+	e := st.entry(cacheKey(testURL), "")
 	if e == nil || e.lifetime != time.Minute || e.initialAge < 10*time.Second || e.initialAge >= 11*time.Second {
 		t.Fatalf("stored entry = %+v, want a lifetime of 1m and an initial age of 10s", e)
 	}
@@ -950,7 +978,7 @@ func TestFreshnessIsStoredWithTheEntry(t *testing.T) {
 	b = &backend{header: http.Header{"Content-Type": {"text/plain"}}, body: "hello"}
 	c, st = newTestCache(t, b, nil)
 	doRequest(c, http.MethodGet, testURL, nil)
-	if e := st.entry(redisKey(testURL), ""); e == nil || e.lifetime != -1 {
+	if e := st.entry(cacheKey(testURL), ""); e == nil || e.lifetime != -1 {
 		t.Fatalf("stored entry = %+v, want no explicit lifetime", e)
 	}
 	if rec := doRequest(c, http.MethodGet, testURL, nil); !isHit(lastCacheStatus(rec)) {

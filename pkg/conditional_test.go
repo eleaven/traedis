@@ -444,7 +444,7 @@ func TestClientConditionsWithoutStoredResponse(t *testing.T) {
 			if tt.want == 304 && (o.validations != 1 || rec.Body.Len() != 0 || rec.Header().Get("ETag") != `"v1"`) {
 				t.Errorf("the 304 must be the one of the backend: %v (304 sent %d)", rec.Header(), o.validations)
 			}
-			if _, stored := st.lookup(redisKey(cacheURI(req, false)), ""); stored != tt.wantStored {
+			if _, stored := st.lookup(cacheKey(cacheURI(req, false)), ""); stored != tt.wantStored {
 				t.Errorf("stored = %v, want %v", stored, tt.wantStored)
 			}
 		})
@@ -498,10 +498,10 @@ func storeValidated(t *testing.T, st *memStore, cacheControl string, age time.Du
 
 func storedAt(t *testing.T, c *cache, st *memStore, uri, field string) *entry {
 	t.Helper()
-	if _, ok := st.lookup(redisKey(uri), field); !ok {
+	if _, ok := st.lookup(cacheKey(uri), field); !ok {
 		return nil
 	}
-	e := st.entry(redisKey(uri), field)
+	e := st.entry(cacheKey(uri), field)
 	if e == nil {
 		t.Fatal("the field must hold an entry")
 	}
@@ -556,10 +556,10 @@ func TestValidation(t *testing.T) {
 	if string(e.body) != "old" || e.header.Get("Cache-Control") != "max-age=120" || e.header.Get("X-New") != "added" || time.Since(e.responseTime) > time.Minute {
 		t.Errorf("§4.3.4 stored entry: %q %v, received %v", e.body, e.header, e.responseTime)
 	}
-	if v, _ := st.lookup(redisKey(staleURL), ""); !closeTo(v.ttl, 2*time.Minute+time.Hour) {
+	if v, _ := st.lookup(cacheKey(staleURL), ""); !closeTo(v.ttl, 2*time.Minute+time.Hour) {
 		t.Errorf("stored ttl = %v", v.ttl)
 	}
-	if v, _ := st.lookup(redisKey(staleURL), bodyField("")); !closeTo(v.ttl, 2*time.Minute+time.Hour) {
+	if v, _ := st.lookup(cacheKey(staleURL), bodyField("")); !closeTo(v.ttl, 2*time.Minute+time.Hour) {
 		t.Errorf("ttl of the body = %v: it must be kept for as long as its entry", v.ttl)
 	}
 	if len(e.header.Values("Cache-Status")) != 1 {
@@ -776,7 +776,7 @@ func TestValidationOfVariant(t *testing.T) {
 	o.extra = http.Header{"Vary": {"Accept-Language, Accept-Encoding"}}
 	c, st := newTestCache(t, o, nil)
 	names := []string{"Accept-Encoding", "Accept-Language"}
-	key := redisKey(staleURL)
+	key := cacheKey(staleURL)
 	at := time.Now().Add(-2 * time.Minute)
 	fields := map[string]string{}
 	for _, lang := range []string{"fr", "en"} {
@@ -973,7 +973,7 @@ func TestValidationReadsTheBodyWhenSent(t *testing.T) {
 			o := newOrigin()
 			c, st := newTestCache(t, o, nil)
 			storeValidated(t, st, "max-age=60", 2*time.Minute)
-			key := redisKey(staleURL)
+			key := cacheKey(staleURL)
 			if tt.gone {
 				if err := st.del(context.Background(), key, []string{bodyField("")}); err != nil {
 					t.Fatal(err)
