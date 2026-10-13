@@ -113,6 +113,7 @@ func TestCurrentAge(t *testing.T) {
 		{name: "§4.2.3 response delay is added to Age", header: http.Header{"Age": {"100"}}, requestTime: t0, responseTime: t0.Add(2 * time.Second), now: t0.Add(2 * time.Second), want: 102 * time.Second},
 		{name: "§4.2.3 apparent age from an old Date", header: http.Header{"Date": {t0.Add(-time.Minute).Format(http.TimeFormat)}}, requestTime: t0, responseTime: t0, now: t0, want: time.Minute},
 		{name: "§4.2.3 Date in the future is clamped", header: http.Header{"Date": {t0.Add(time.Hour).Format(http.TimeFormat)}}, requestTime: t0, responseTime: t0, now: t0, want: 0},
+		{name: "stored by an instance whose clock is ahead", header: http.Header{"Age": {"100"}}, requestTime: t0, responseTime: t0, now: t0.Add(-5 * time.Second), want: 100 * time.Second},
 		{name: "§5.1 invalid Age is ignored", header: http.Header{"Age": {"-5"}}, requestTime: t0, responseTime: t0, now: t0, want: 0},
 		{name: "§5.1 first member of an Age list", header: http.Header{"Age": {"100, 5"}}, requestTime: t0, responseTime: t0, now: t0, want: 100 * time.Second},
 		{name: "§5.1 invalid first member of an Age list", header: http.Header{"Age": {"x, 5"}}, requestTime: t0, responseTime: t0, now: t0, want: 0},

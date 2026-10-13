@@ -269,9 +269,15 @@ func setFreshness(e *entry, cc cacheControl) {
 	}
 }
 
-// currentAge returns the age of e at the given time (§4.2.3).
+// currentAge returns the age of e at the given time (§4.2.3). An entry stored
+// by an instance whose clock is ahead of ours was not received in the future:
+// its resident time is never negative.
 func currentAge(e *entry, now time.Time) time.Duration {
-	return e.initialAge + now.Sub(e.responseTime)
+	resident := now.Sub(e.responseTime)
+	if resident < 0 {
+		resident = 0
+	}
+	return e.initialAge + resident
 }
 
 // initialAge returns the corrected initial age of a response (§4.2.3): its age
