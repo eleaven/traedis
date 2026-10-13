@@ -13,8 +13,9 @@ import (
 // has a stored response to validate, it sends the backend its validators
 // instead (§4.3.1).
 
-// conditions lists the request header fields the cache evaluates. The other
-// preconditions (If-Match, If-Unmodified-Since, If-Range) are for the backend.
+// conditions lists the request header fields the cache evaluates. If-Match and
+// If-Unmodified-Since are for the backend, and If-Range goes with Range (see
+// serveRange).
 var conditions = []string{"If-None-Match", "If-Modified-Since"}
 
 // conditional reports whether a request has conditions that the cache

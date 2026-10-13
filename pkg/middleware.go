@@ -269,7 +269,8 @@ func expectsStream(r *http.Request) bool {
 }
 
 // serve answers from a stored entry (§4), fresh or stale: with a 304 when the
-// client says it already has it (§4.3.2). The entry is ready for r (see ready).
+// client says it already has it (§4.3.2), with the bytes it asks for when it
+// asks for some (see serveRange). The entry is ready for r (see ready).
 func (c *cache) serve(w http.ResponseWriter, r *http.Request, e *entry, age, lifetime time.Duration, status cacheStatus) {
 	h := w.Header()
 	for name, values := range e.header {
@@ -290,6 +291,10 @@ func (c *cache) serve(w http.ResponseWriter, r *http.Request, e *entry, age, lif
 	}
 	if bodyAllowed(e.status) {
 		h.Set("Content-Length", strconv.FormatInt(e.size, 10))
+	}
+	if e.status == http.StatusOK && r.Method == http.MethodGet && wantsRange(r.Header, h) {
+		serveRange(w, r, e)
+		return
 	}
 	w.WriteHeader(e.status)
 	if r.Method != http.MethodHead && bodyAllowed(e.status) {

@@ -129,6 +129,7 @@ The request of the client says whether a stored response may answer it.
 - `Pragma: no-cache`: like `Cache-Control: no-cache`, for a request without `Cache-Control`.
 - `If-None-Match`, `If-Modified-Since`: answered with a `304` when the stored response is the one the client
   [already has](#conditional-requests).
+- `Range`, `If-Range`: answered with the bytes asked for of the stored response ([range requests](#range-requests)).
 - `Authorization`: the response is only stored with `public`, `s-maxage` or `must-revalidate`.
 - `Cookie`: not part of the cache key, see [Security](#security).
 - `Accept-Encoding`, and the header fields that `Vary` names: choose the [variant](#variants).
@@ -218,8 +219,8 @@ The cache plays both parts of `If-None-Match`, `If-Modified-Since` and `304 Not 
 
 **Towards its clients**, it answers `304` from a stored response whose `ETag` is one of `If-None-Match` (weak comparison), or that was not
 modified since `If-Modified-Since` (its `Last-Modified`, otherwise its `Date`). With nothing stored, the request reaches the backend as it
-is and its `304` goes to the client, without being stored: a URL is cached once a client asks for it without having it already. `If-Match`,
-`If-Unmodified-Since` and `If-Range` are always for the backend.
+is and its `304` goes to the client, without being stored: a URL is cached once a client asks for it without having it already. `If-Match`
+and `If-Unmodified-Since` are always for the backend.
 
 **Towards the backend**, it validates a stored response that may no longer be served (stale, or too old for the `max-age` of the request):
 its `ETag` and `Last-Modified` are sent in place of the conditions of the client. The background refresh of `stale-while-revalidate` does
@@ -236,6 +237,20 @@ the same.
 
 A `HEAD` request is never made conditional. A response with the `ETag` or the `Last-Modified` of the stored one (and its length) refreshes
 it like a `304`; a different one drops a stored response that was still fresh.
+
+### Range requests
+
+Only whole responses are stored. A `GET` for some bytes of one (`Range: bytes=0-1023`) is answered from it, as the backend would
+([RFC 9110 §14](https://www.rfc-editor.org/rfc/rfc9110#section-14)):
+
+- with a `206 Partial Content` that has these bytes, in several parts when it asks for several ranges, or a `416` when there are none;
+- with the whole response when its `If-Range` is not the `ETag` or the `Last-Modified` of the stored one, or when the backend said
+  `Accept-Ranges: none`;
+- with a `304` when its `If-None-Match` or `If-Modified-Since` says it already has the response: these [conditions](#conditional-requests)
+  come first.
+
+With nothing stored, the request reaches the backend as it is and its `206` goes to the client, without being stored: a URL is cached once
+a client asks for all of it.
 
 ### Stale responses
 

@@ -61,7 +61,8 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	c.ServeHTTP(rec, req)
 	settle(c)
 
-	if rec.Code != 200 || rec.Body.String() != "old" {
+	// The bytes that the request asks for: see serveRange.
+	if rec.Code != 206 || rec.Body.String() != "ol" {
 		t.Fatalf("RFC 5861 §3 the stale response must be served: got %d %q", rec.Code, rec.Body.String())
 	}
 	if got := lastCacheStatus(rec); got != "traedis; hit; ttl=-10; detail=stale-while-revalidate" && got != "traedis; hit; ttl=-11; detail=stale-while-revalidate" {

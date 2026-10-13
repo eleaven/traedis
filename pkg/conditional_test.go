@@ -536,7 +536,8 @@ func TestValidation(t *testing.T) {
 	if req.Header.Get("If-None-Match") != "" {
 		t.Error("the request of the client must not be modified")
 	}
-	if rec.Code != 200 || rec.Body.String() != "old" || rec.Header().Get("Content-Length") != "3" {
+	// The bytes that the request asks for: see serveRange.
+	if rec.Code != 206 || rec.Body.String() != "ol" || rec.Header().Get("Content-Range") != "bytes 0-1/3" {
 		t.Fatalf("§4.3.3 the stored response must be served: got %d %q", rec.Code, rec.Body.String())
 	}
 	h := rec.Header()
