@@ -1,4 +1,4 @@
-displayName: 'Traedis – HTTP Cache on Redis'
+displayName: 'Traedis – Redis-backed HTTP Cache'
 type: middleware
 iconPath: assets/icon.png
 import: github.com/eleaven/traedis/pkg
