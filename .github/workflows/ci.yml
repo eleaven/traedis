@@ -36,6 +36,8 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test -race ./...
+      # Each fuzzer for a short while: their seeds already ran with the tests
+      - run: make fuzz FUZZTIME=10s
       # The interpreter Traefik v3.7 embeds: this is what runs in production.
       - run: go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1
       - run: yaegi test -v .

@@ -1,6 +1,6 @@
 # @see: https://stackoverflow.com/a/70550568
 MAKEFLAGS += --no-print-directory
-.PHONY: help start stop reset unwatch test unit e2e bench bench-view assets
+.PHONY: help start stop reset unwatch test unit fuzz e2e bench bench-view assets
 
 # Services the tests and benchmarks need: the whole stack but Redis Insight
 TEST_STACK := ingress cache cache-tls whoami placeholder imaging
@@ -44,6 +44,13 @@ unit: stop ## Run gofmt, go vet, then unit and Redis integration tests (compiled
 	go vet ./...
 	$(down_on_exit); docker compose up -d --wait --wait-timeout 120 cache \
 		&& go test -race ./... && (cd pkg && yaegi test -v .)
+
+fuzz: FUZZTIME ?= 30s
+fuzz: ## Run each fuzzer of pkg/fuzz_test.go for FUZZTIME (30s): what it finds goes to pkg/testdata/fuzz
+	@for target in $$(go test -list '^Fuzz' ./pkg | grep '^Fuzz'); do \
+		echo "# $$target"; \
+		go test -run '^$$' -fuzz "^$$target\$$" -fuzztime $(FUZZTIME) ./pkg || exit 1; \
+	done
 
 e2e: stop ## Run end-to-end tests (Hurl through Traefik)
 	$(down_on_exit); docker compose up -d --wait --wait-timeout 120 $(TEST_STACK) && ./e2e/run.sh

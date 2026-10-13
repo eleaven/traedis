@@ -25,6 +25,7 @@ make start       # start the local stack; Traefik restarts whenever the plugin c
 make stop        # stop the stack (`make reset` also removes the volumes)
 make test        # all the tests the CI requires: `make unit`, then `make e2e`
 make unit        # gofmt, go vet, go test -race, then the same tests under Yaegi, with a Redis for the integration tests
+make fuzz        # each fuzzer of pkg/fuzz_test.go for 30 s (FUZZTIME=5m for longer)
 make e2e         # end-to-end tests, through Traefik
 make bench       # benchmarks → benchmark/results.json (`make bench-view` shows them)
 make help        # list all targets
@@ -45,6 +46,8 @@ make help        # list all targets
   bumps its version prefix.
 - **The README is the specification.** A change of behaviour updates its "Caching rules" or "Security" section. An option is declared in
   `pkg/config.go`, in the README table and in the `testData` of `.traefik.yml`.
+- **What parses untrusted data has a fuzzer** in `pkg/fuzz_test.go`. An input that `make fuzz` finds is committed with its fix, in
+  `pkg/testdata/fuzz`: it then runs with the tests.
 - **Every bug fix comes with a regression test**, and what is visible through Traefik with an end-to-end one. The files of `e2e/tests/` run
   in parallel: each one only requests URLs that its own `{{newUuid}}` makes unique.
 - **Keep the code simple.** Concise and easy to follow, with comments that give the reason rather than repeat the code: the RFC section
