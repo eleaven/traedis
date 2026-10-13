@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"net/http"
+	"os"
+	"reflect"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +28,17 @@ type cache struct {
 
 	revalMu      sync.Mutex
 	revalidating map[string]bool // keys being revalidated, at most maxRevalidations
+
+	writeMu sync.Mutex
+	writing map[string]*pendingWrite // keys being written to (see later), at most redis.poolSize
+}
+
+// pendingWrite is a write to a key that is running.
+type pendingWrite struct {
+	done chan struct{} // closed once it has run
+	// invalidated is set, under writeMu, when an unsafe request invalidated
+	// the key in the meantime: what is written must not stay.
+	invalidated bool
 }
 
 // New creates the middleware. It never contacts Redis: Traefik must start even
@@ -43,6 +56,7 @@ func newCache(next http.Handler, name string, cfg settings, s store) *cache {
 	return &cache{
 		next: next, name: name, cfg: cfg, store: s, markers: &markers{},
 		revalidating: map[string]bool{},
+		writing:      map[string]*pendingWrite{},
 	}
 }
 
@@ -71,6 +85,15 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		status.fwd = "request"
 		c.forward(w, r, key, "", reqCC, status, true, nil)
 		return
+	}
+
+	// What the previous response for this URL had to store comes first (see
+	// later). Read here, not by a method: see find.
+	c.writeMu.Lock()
+	pending := c.writing[key]
+	c.writeMu.Unlock()
+	if pending != nil {
+		await(r.Context(), pending.done, c.cfg.redis.dialTimeout)
 	}
 
 	// The body is only read along with the entry when the answer is sure to
@@ -316,7 +339,6 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 	if !rec.wroteHeader {
 		rec.WriteHeader(http.StatusOK)
 	}
-	ctx := context.WithoutCancel(r.Context())
 
 	if stored != nil && m.staleIfError {
 		// Nothing of the backend's error was sent: the stored response replaces it.
@@ -341,9 +363,8 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 		status.served = true
 		c.serve(w, r, e, currentAge(e, time.Now()), freshnessLifetime(e, c.cfg.defaultTTL), status)
 		if m.updated {
-			// The client gets the whole response before the Redis writes.
-			flush(w)
-			c.freshen(ctx, r, reqCC, key, field, e)
+			req := r.Clone(context.Background())
+			c.later(key, func(ctx context.Context) { c.freshen(ctx, req, reqCC, key, field, e) })
 		}
 		return
 	}
@@ -355,11 +376,82 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 		return
 	}
 	if m.headHeader != nil {
-		rec.Flush()
-		c.freshenWithHead(ctx, r, reqCC, key, field, stored, m)
+		req := r.Clone(context.Background())
+		c.later(key, func(ctx context.Context) { c.freshenWithHead(ctx, req, reqCC, key, field, stored, m) })
 		return
 	}
-	c.save(ctx, rec, m, key)
+	if fields, ok := c.toStore(rec, m); ok {
+		c.later(key, func(ctx context.Context) { c.put(ctx, key, m.variant, fields, m.ttl) })
+	}
+}
+
+// later runs write, the store writes that the response to a request for key
+// calls for, once the request is served: a response is not complete for its
+// client until ServeHTTP returns, which must not wait for Redis. write only
+// uses what is its own by then: neither the request nor its writer.
+//
+// The requests for key that follow wait for it (see ServeHTTP and unstore), so
+// that a response is stored before the next one is looked for. Writes are
+// bounded: one per key, and no more than Redis has connections. Past that,
+// write is not run: a later response is stored instead.
+func (c *cache) later(key string, write func(ctx context.Context)) {
+	p := &pendingWrite{done: make(chan struct{})}
+	c.writeMu.Lock()
+	busy := c.writing[key] != nil || len(c.writing) >= c.cfg.redis.poolSize
+	if !busy {
+		c.writing[key] = p
+	}
+	c.writeMu.Unlock()
+	if !busy {
+		go c.write(key, p, write)
+	}
+}
+
+func (c *cache) write(key string, p *pendingWrite, write func(ctx context.Context)) {
+	defer c.written(key, p)
+	write(context.Background())
+}
+
+// written ends the write to key. Nothing else recovers a panic in a goroutine
+// of ours: it must not take Traefik down.
+func (c *cache) written(key string, p *pendingWrite) {
+	if r := recover(); r != nil {
+		logf(os.Stderr, c.name, "panic while storing a response: %v", r)
+	}
+	c.writeMu.Lock()
+	delete(c.writing, key)
+	invalidated := p.invalidated
+	c.writeMu.Unlock()
+	if invalidated {
+		_ = c.store.invalidate(context.Background(), key)
+	}
+	close(p.done)
+}
+
+// unstore removes key from the store (§4.4), after the write to it that is
+// running, if any: were it to end later, it is told to remove the key too.
+func (c *cache) unstore(ctx context.Context, key string) error {
+	c.writeMu.Lock()
+	pending := c.writing[key]
+	if pending != nil {
+		pending.invalidated = true
+	}
+	c.writeMu.Unlock()
+	if pending != nil {
+		await(ctx, pending.done, c.cfg.redis.dialTimeout)
+	}
+	return c.store.invalidate(ctx, key)
+}
+
+// await waits for done to be closed, no longer than timeout nor than ctx.
+// Without a select statement: see redisClient.
+func await(ctx context.Context, done chan struct{}, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	reflect.Select([]reflect.SelectCase{
+		{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(done)},
+		{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(ctx.Done())},
+	})
 }
 
 // freshenWithHead applies the 200 response to a forwarded HEAD to the stored
@@ -437,25 +529,22 @@ func (c *cache) freshen(ctx context.Context, req *http.Request, reqCC cacheContr
 	}
 }
 
-// save stores the recorded response when the hook allowed it and its body was
-// fully captured. It reports whether the response was sent to the store.
-func (c *cache) save(ctx context.Context, rec *recorder, m *missHook, key string) bool {
+// toStore returns the fields to store the recorded response in, when the hook
+// allowed it and its body was fully captured: its entry and its body.
+func (c *cache) toStore(rec *recorder, m *missHook) ([]fieldValue, bool) {
 	body, complete := rec.body()
 	if !complete || !m.store {
-		return false
+		return nil, false
 	}
 	e := m.entry
 	e.size = int64(len(body))
 	data := encodeEntry(e)
 	if len(data) > entryOverhead {
-		return false
+		return nil, false
 	}
-	// The client gets the whole response before the Redis writes.
-	rec.Flush()
 	field := m.variant.field
 	// The body goes to Redis as the recorder holds it: it is not copied.
-	c.put(ctx, key, m.variant, []fieldValue{{name: field, value: data}, {name: bodyField(field), value: body}}, m.ttl)
-	return true
+	return []fieldValue{{name: field, value: data}, {name: bodyField(field), value: body}}, true
 }
 
 // put stores fields in key: what there is to write of the response that v

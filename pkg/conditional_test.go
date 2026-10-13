@@ -434,6 +434,7 @@ func TestClientConditionsWithoutStoredResponse(t *testing.T) {
 			}
 			rec := httptest.NewRecorder()
 			c.ServeHTTP(rec, req)
+			settle(c)
 
 			if o.lastReq != req {
 				t.Error("the backend must get the request of the client itself")
@@ -523,6 +524,7 @@ func TestValidation(t *testing.T) {
 	rec := httptest.NewRecorder()
 	rec.Header().Set("X-Before", "kept") // set by a middleware before the cache
 	c.ServeHTTP(rec, req)
+	settle(c)
 
 	got := o.lastReq
 	if o.calls != 1 || got.Header.Get("If-None-Match") != `"v1"` || got.Header.Get("If-Modified-Since") != lastModified {
@@ -747,6 +749,7 @@ func TestValidationWithSetCookie(t *testing.T) {
 			rec := httptest.NewRecorder()
 			rec.Header().Add("Set-Cookie", "before=1") // set by a middleware before the cache
 			c.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, staleURL, nil))
+			settle(c)
 			if rec.Body.String() != "old" || !strings.HasPrefix(lastCacheStatus(rec), validated) {
 				t.Fatalf("got %q %q", rec.Body.String(), lastCacheStatus(rec))
 			}

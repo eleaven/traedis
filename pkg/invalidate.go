@@ -23,7 +23,7 @@ func (c *cache) invalidate(w http.ResponseWriter, r *http.Request) {
 	key := redisKey(c.name, cacheURI(r, c.cfg.sortQuery))
 	iw := &invalidator{
 		rw:     w,
-		store:  c.store,
+		c:      c,
 		ctx:    context.WithoutCancel(r.Context()),
 		key:    key,
 		status: cacheStatus{fwd: "method"},
@@ -51,7 +51,7 @@ func (c *cache) invalidate(w http.ResponseWriter, r *http.Request) {
 // the underlying map).
 type invalidator struct {
 	rw          http.ResponseWriter
-	store       store
+	c           *cache
 	ctx         context.Context
 	key         string
 	status      cacheStatus
@@ -77,7 +77,7 @@ func (i *invalidator) WriteHeader(code int) {
 	i.status.fwdStatus = code
 	if code >= 200 && code < 400 {
 		i.status.detail = "invalidated"
-		if err := i.store.invalidate(i.ctx, i.key); err != nil {
+		if err := i.c.unstore(i.ctx, i.key); err != nil {
 			i.status.detail = "redis"
 		}
 	}

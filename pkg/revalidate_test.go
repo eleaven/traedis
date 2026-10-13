@@ -59,6 +59,7 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	req.Header.Set("Accept-Language", "fr")
 	rec := httptest.NewRecorder()
 	c.ServeHTTP(rec, req)
+	settle(c)
 
 	if rec.Code != 200 || rec.Body.String() != "old" {
 		t.Fatalf("RFC 5861 §3 the stale response must be served: got %d %q", rec.Code, rec.Body.String())

@@ -190,7 +190,7 @@ func TestInvalidatorFlushes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rw := httptest.NewRecorder()
-			iw := &invalidator{rw: rw, store: newMemStore(), ctx: context.Background(), key: "k", status: cacheStatus{fwd: "method"}}
+			iw := &invalidator{rw: rw, c: newCache(nil, "cache", settings{}, newMemStore()), ctx: context.Background(), key: "k", status: cacheStatus{fwd: "method"}}
 			if tt.contentLength != "" {
 				iw.Header().Set("Content-Length", tt.contentLength)
 			}
@@ -217,7 +217,7 @@ func TestInvalidatorFlushes(t *testing.T) {
 func TestInvalidatorPassesInformationalResponses(t *testing.T) {
 	rw := &writerStub{header: http.Header{}}
 	st := newMemStore()
-	iw := &invalidator{rw: rw, store: st, ctx: context.Background(), key: "k", status: cacheStatus{fwd: "method"}}
+	iw := &invalidator{rw: rw, c: newCache(nil, "cache", settings{}, st), ctx: context.Background(), key: "k", status: cacheStatus{fwd: "method"}}
 	iw.WriteHeader(http.StatusEarlyHints)
 	if st.invalidations != 0 || iw.wroteHeader {
 		t.Error("an informational response is not the status of the response")
@@ -234,7 +234,7 @@ func TestInvalidatorPassesInformationalResponses(t *testing.T) {
 
 func TestInvalidatorPreservesFlusherAndUnwrap(t *testing.T) {
 	rw := httptest.NewRecorder()
-	iw := &invalidator{rw: rw, store: newMemStore(), ctx: context.Background(), key: "k", status: cacheStatus{fwd: "method"}}
+	iw := &invalidator{rw: rw, c: newCache(nil, "cache", settings{}, newMemStore()), ctx: context.Background(), key: "k", status: cacheStatus{fwd: "method"}}
 	var w any = iw
 	f, ok := w.(http.Flusher)
 	if !ok {

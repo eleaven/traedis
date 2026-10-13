@@ -68,7 +68,9 @@ func (c *cache) refresh(req *http.Request, key, field string, e *entry) {
 		}
 		return
 	}
-	if !c.save(ctx, rec, m, key) && m.superseded {
+	if fields, ok := c.toStore(rec, m); ok {
+		c.put(ctx, key, m.variant, fields, m.ttl)
+	} else if m.superseded {
 		c.drop(ctx, key, field)
 	}
 }

@@ -974,6 +974,7 @@ func TestStaleVariantIsRevalidated(t *testing.T) {
 	req.Header.Set("Accept-Encoding", "gzip, br")
 	rec := httptest.NewRecorder()
 	c.ServeHTTP(rec, req)
+	settle(c)
 	if rec.Body.String() != "old fr" || !isStaleWhileRevalidate(lastCacheStatus(rec)) {
 		t.Fatalf("RFC 5861 §3 the stale variant must be served: got %q %q", rec.Body.String(), lastCacheStatus(rec))
 	}

@@ -64,7 +64,26 @@ func doRequest(h http.Handler, method, target string, hdr http.Header) *httptest
 	}
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
+	if c, ok := h.(*cache); ok {
+		settle(c)
+	}
 	return rec
+}
+
+// settle waits for what the responses served by c had to store (see later).
+func settle(c *cache) {
+	for {
+		var pending *pendingWrite
+		c.writeMu.Lock()
+		for _, p := range c.writing {
+			pending = p
+		}
+		c.writeMu.Unlock()
+		if pending == nil {
+			return
+		}
+		<-pending.done
+	}
 }
 
 func cacheableBackend() *backend {
@@ -457,6 +476,7 @@ func TestStaleIfError(t *testing.T) {
 			rec := httptest.NewRecorder()
 			rec.Header().Set("X-Before", "kept") // set by a middleware before the cache
 			c.ServeHTTP(rec, req)
+			settle(c)
 
 			if b.calls != 1 {
 				t.Fatalf("backend calls = %d, want 1", b.calls)
@@ -779,6 +799,7 @@ func TestResponseStreams(t *testing.T) {
 			if err != nil || string(rest) != "second\n" {
 				t.Errorf("rest of the body = %q, %v", rest, err)
 			}
+			settle(c)
 			if st.sets != tt.wantSets {
 				t.Errorf("sets = %d, want %d", st.sets, tt.wantSets)
 			}
@@ -808,6 +829,7 @@ func TestTraceContextIsPropagated(t *testing.T) {
 	req.Header.Set("Traceparent", "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 	req.Header.Set("Tracestate", "vendor=1")
 	c.ServeHTTP(httptest.NewRecorder(), req)
+	settle(c)
 
 	got := b.lastReq
 	if got.Context().Value(ctxKey{}) != "span" {
@@ -987,5 +1009,176 @@ func TestFreshnessIsStoredWithTheEntry(t *testing.T) {
 	c.cfg.defaultTTL = 0
 	if rec := doRequest(c, http.MethodGet, testURL, nil); lastCacheStatus(rec) != "traedis; fwd=stale; fwd-status=200" {
 		t.Errorf("defaultTtl lowered to 0: got %q", lastCacheStatus(rec))
+	}
+}
+
+// gatedStore holds its writes back until its gate is closed, as a slow Redis.
+type gatedStore struct {
+	*memStore
+	gate   chan struct{}
+	panics bool
+}
+
+func (s *gatedStore) set(ctx context.Context, key string, fields []fieldValue, ttl time.Duration, replace bool) error {
+	<-s.gate
+	if s.panics {
+		panic("store panic")
+	}
+	return s.memStore.set(ctx, key, fields, ttl, replace)
+}
+
+func newGatedCache(t *testing.T, b http.Handler, mutate func(*Config)) (*cache, *gatedStore) {
+	t.Helper()
+	cfg := CreateConfig()
+	if mutate != nil {
+		mutate(cfg)
+	}
+	s, err := parseConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := &gatedStore{memStore: newMemStore(), gate: make(chan struct{})}
+	return newCache(b, "cache", s, st), st
+}
+
+// serve makes a request without waiting for what its response has to store.
+func serve(t *testing.T, c *cache, method, target string) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	served := make(chan struct{})
+	go func() {
+		c.ServeHTTP(rec, httptest.NewRequest(method, target, nil))
+		close(served)
+	}()
+	select {
+	case <-served:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the request waits for the store")
+	}
+	return rec
+}
+
+func pendingWrites(c *cache) int {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return len(c.writing)
+}
+
+// A response is complete for its client once the handler returns: storing it
+// must not hold that back, however slow Redis is.
+func TestStoringDoesNotDelayTheResponse(t *testing.T) {
+	b := cacheableBackend()
+	c, st := newGatedCache(t, b, nil)
+	rec := serve(t, c, http.MethodGet, testURL)
+	if rec.Body.String() != "hello" || lastCacheStatus(rec) != "traedis; fwd=uri-miss; fwd-status=200" {
+		t.Errorf("got %q %q", rec.Body.String(), lastCacheStatus(rec))
+	}
+	if _, stored := st.lookup(cacheKey(testURL), ""); stored || pendingWrites(c) != 1 {
+		t.Errorf("stored = %v, writes running = %d, want a write that waits for the store", stored, pendingWrites(c))
+	}
+	close(st.gate)
+	settle(c)
+	if _, stored := st.lookup(cacheKey(testURL), ""); !stored || pendingWrites(c) != 0 {
+		t.Errorf("stored = %v, writes running = %d, want the response stored", stored, pendingWrites(c))
+	}
+}
+
+// The next request for the URL waits for the response to be stored, which it
+// is then served: a miss is followed by a hit.
+func TestNextRequestWaitsForTheStore(t *testing.T) {
+	b := cacheableBackend()
+	c, st := newGatedCache(t, b, func(cfg *Config) { cfg.Redis.DialTimeout = "5s"; cfg.Redis.Timeout = "5s" })
+	serve(t, c, http.MethodGet, testURL)
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		close(st.gate)
+	}()
+	if rec := doRequest(c, http.MethodGet, testURL, nil); !isHit(lastCacheStatus(rec)) || b.calls != 1 {
+		t.Errorf("Cache-Status = %q, backend calls = %d, want a hit", lastCacheStatus(rec), b.calls)
+	}
+}
+
+// Not for longer than redis.dialTimeout: it is then forwarded, and its
+// response not stored on top of the one that still is.
+func TestNextRequestDoesNotWaitForASlowStore(t *testing.T) {
+	b := cacheableBackend()
+	c, st := newGatedCache(t, b, func(cfg *Config) { cfg.Redis.DialTimeout = "20ms" })
+	serve(t, c, http.MethodGet, testURL)
+	rec := serve(t, c, http.MethodGet, testURL)
+	if lastCacheStatus(rec) != "traedis; fwd=uri-miss; fwd-status=200" || b.calls != 2 || pendingWrites(c) != 1 {
+		t.Errorf("Cache-Status = %q, backend calls = %d, writes running = %d", lastCacheStatus(rec), b.calls, pendingWrites(c))
+	}
+	close(st.gate)
+	settle(c)
+	if st.sets != 1 {
+		t.Errorf("sets = %d, want 1", st.sets)
+	}
+}
+
+// No more writes run than Redis has connections: past that, a response is not
+// stored, and a later one is.
+func TestStoreWritesAreBounded(t *testing.T) {
+	b := cacheableBackend()
+	c, st := newGatedCache(t, b, func(cfg *Config) { cfg.Redis.PoolSize = 2 })
+	urls := []string{"http://example.com/1", "http://example.com/2", "http://example.com/3"}
+	for _, u := range urls {
+		serve(t, c, http.MethodGet, u)
+	}
+	if n := pendingWrites(c); n != 2 {
+		t.Errorf("writes running = %d, want 2", n)
+	}
+	close(st.gate)
+	settle(c)
+	if _, stored := st.lookup(cacheKey(urls[2]), ""); stored || st.sets != 2 {
+		t.Errorf("third response stored = %v, sets = %d", stored, st.sets)
+	}
+	doRequest(c, http.MethodGet, urls[2], nil)
+	if _, stored := st.lookup(cacheKey(urls[2]), ""); !stored {
+		t.Error("the response to a later request must be stored")
+	}
+}
+
+// §4.4: a response that is still being stored when an unsafe request
+// invalidates its URL does not outlive it, whether the write ends while the
+// unsafe request waits for it or after.
+func TestInvalidationOfAResponseBeingStored(t *testing.T) {
+	for _, dialTimeout := range []string{"5s", "20ms"} {
+		t.Run("redis.dialTimeout "+dialTimeout, func(t *testing.T) {
+			// (Not as an argument: Yaegi v0.16.1 then fails to make a handler
+			// of it in a subtest.)
+			b := cacheableBackend()
+			c, st := newGatedCache(t, b, func(cfg *Config) { cfg.Redis.DialTimeout = dialTimeout; cfg.Redis.Timeout = "5s" })
+			serve(t, c, http.MethodGet, testURL)
+			go func() {
+				time.Sleep(100 * time.Millisecond)
+				close(st.gate)
+			}()
+			rec := serve(t, c, http.MethodPost, testURL)
+			if lastCacheStatus(rec) != "traedis; fwd=method; fwd-status=200; detail=invalidated" {
+				t.Errorf("Cache-Status = %q", lastCacheStatus(rec))
+			}
+			settle(c)
+			if _, stored := st.lookup(cacheKey(testURL), ""); stored {
+				t.Error("the response stored before the unsafe request must be gone")
+			}
+		})
+	}
+}
+
+// A panic while storing must not take Traefik down, nor keep the next
+// responses from being stored.
+func TestStorePanicIsRecovered(t *testing.T) {
+	b := cacheableBackend()
+	c, st := newGatedCache(t, b, nil)
+	close(st.gate)
+	st.panics = true
+	doRequest(c, http.MethodGet, testURL, nil)
+	if n := pendingWrites(c); n != 0 {
+		t.Fatalf("writes running = %d, want 0", n)
+	}
+	st.panics = false
+	doRequest(c, http.MethodGet, testURL, nil)
+	if _, stored := st.lookup(cacheKey(testURL), ""); !stored {
+		t.Error("the next response must be stored")
 	}
 }

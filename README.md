@@ -172,6 +172,10 @@ Responses are stored by middleware and by URL (scheme, host, path and query), an
 - no [header field](#http-headers) of the request or of the response forbids it;
 - it is complete (a response that the backend cuts short is not stored) and fits in `maxBodyBytes`.
 
+A response is stored once it is sent: its client never waits for Redis. The next request for the same URL does, for no longer than
+`redis.dialTimeout`, so that a miss is followed by a hit. No more responses are being stored at a time than `redis.poolSize`, and one per
+URL: past that, a response is not stored, and the next one for its URL is.
+
 `OPTIONS`, `TRACE`, WebSocket upgrades and `Accept: text/event-stream` requests are forwarded as is. So are unsafe methods (`POST`, `PUT`,
 `DELETE`…), which [invalidate](#invalidation-by-unsafe-methods) what is stored.
 
@@ -321,7 +325,7 @@ http:
 ## Performance
 
 A hit is served from Redis in about 2 ms, whatever the backend costs: the slower the backend, the larger the gain. A miss takes no longer
-than the backend alone.
+than the backend alone: its response is stored once the client has it.
 
 Load test through Traefik with 10 concurrent clients, as requests per second and median latency:
 
