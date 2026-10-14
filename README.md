@@ -341,18 +341,18 @@ http:
 
 ## Performance
 
-A hit is served from Redis in about 2 ms, whatever the backend costs: the slower the backend, the larger the gain. A miss takes no longer
+A hit is served from Redis in about 1.5 ms, whatever the backend costs: the slower the backend, the larger the gain. A miss takes no longer
 than the backend alone: its response is stored once the client has it.
 
 Load test through Traefik with 10 concurrent clients, as requests per second and median latency:
 
 | Backend | Without cache | Cache miss | Cache hit | Gain |
 | --- | --: | --: | --: | --: |
-| [Text answered after 100 ms][whoami] | 98.1 req/s – 102 ms | 98.0 req/s – 102 ms | 4,182 req/s – 1.73 ms | **×43** |
-| [Rendered PNG][placeholder] | 77.3 req/s – 124 ms | 81.8 req/s – 115 ms | 3,900 req/s – 1.84 ms | **×50** |
-| [Image converted to AVIF][imaging] | 64.1 req/s – 143 ms | 57.9 req/s – 161 ms | 4,009 req/s – 1.79 ms | **×62** |
+| [Text answered after 100 ms][whoami] | 99.0 req/s – 102 ms | 97.0 req/s – 103 ms | 5,032 req/s – 1.48 ms | **×51** |
+| [Rendered PNG][placeholder] | 98.4 req/s – 96.2 ms | 106 req/s – 87.7 ms | 4,598 req/s – 1.60 ms | **×47** |
+| [Image converted to AVIF][imaging] | 85.7 req/s – 107 ms | 84.7 req/s – 107 ms | 4,768 req/s – 1.56 ms | **×56** |
 
-These figures come from the [CI run of October 12, 2026][bench-run], on a shared GitHub Actions runner: read them as orders of magnitude.
+These figures come from the [CI run of October 13, 2026][bench-run], on a shared GitHub Actions runner: read them as orders of magnitude.
 Every [CI][ci] run publishes its own in its summary, with the p95 and the cost of the middleware alone. `make bench` runs them locally.
 
 ## Contributing
@@ -370,7 +370,7 @@ See [CONTRIBUTING.md][contributing] for the local stack, the tests and the rules
 [rfc9111-4.4]: https://www.rfc-editor.org/rfc/rfc9111#section-4.4
 [rfc5861]: https://www.rfc-editor.org/rfc/rfc5861
 [rfc9211]: https://www.rfc-editor.org/rfc/rfc9211
-[bench-run]: https://www.github.com/eleaven/traedis/actions/runs/38289730377/attempts/1#summary-114946639664
+[bench-run]: https://www.github.com/eleaven/traedis/actions/runs/38480761928/attempts/1#summary-115582483916
 [whoami]: https://github.com/eleaven/traedis/blob/main/example/dynamic/whoami.yml
 [placeholder]: https://github.com/eleaven/traedis/blob/main/example/dynamic/placeholder.yml
 [imaging]: https://github.com/eleaven/traedis/blob/main/example/dynamic/imaging.yml
