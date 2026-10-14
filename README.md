@@ -11,6 +11,7 @@
 
 # Traedis
 
+[![Release](https://img.shields.io/github/v/release/eleaven/traedis)][releases]
 [![CI](https://img.shields.io/github/actions/workflow/status/eleaven/traedis/ci.yml?branch=main&label=CI)][ci]
 
 **Redis**-backed HTTP cache for **Traefik**, shipped as a **middleware plugin**.
@@ -364,6 +365,7 @@ See [CONTRIBUTING.md][contributing] for the local stack, the tests and the rules
 [MIT][license]
 
 [ci]: https://www.github.com/eleaven/traedis/actions/workflows/ci.yml
+[releases]: https://github.com/eleaven/traedis/releases
 [rfc9111]: https://www.rfc-editor.org/rfc/rfc9111
 [rfc9111-4.1]: https://www.rfc-editor.org/rfc/rfc9111#section-4.1
 [rfc9111-4.3]: https://www.rfc-editor.org/rfc/rfc9111#section-4.3
