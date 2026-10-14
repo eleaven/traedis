@@ -341,7 +341,7 @@ http:
 
 ## Performance
 
-A hit is served from Redis in about 1.5 ms, whatever the backend costs: the slower the backend, the larger the gain. A miss takes no longer
+A hit is served from Traedis in about 1.5 ms, whatever the backend costs: the slower the backend, the larger the gain. A miss takes no longer
 than the backend alone: its response is stored once the client has it.
 
 Load test through Traefik with 10 concurrent clients, as requests per second and median latency:
