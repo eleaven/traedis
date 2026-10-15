@@ -1,9 +1,12 @@
 displayName: 'Traedis – Redis-backed HTTP Cache'
+summary: >-
+  Standards-based HTTP cache for Traefik that stores backend responses in Redis. Honors Cache-Control, Vary, ETag and 304 (RFC 9111),
+  stale-while-revalidate and stale-if-error (RFC 5861), reports what the cache did for each response in a Cache-Status header (RFC 9211),
+  never shares responses meant for a single user, and fails open when Redis is unavailable.
 type: middleware
 iconPath: assets/icon.png
 import: github.com/eleaven/traedis/pkg
 basePkg: traedis
-summary: 'RFC 9111 shared cache: Vary, ETag, stale-while-revalidate, fail-open'
 testData:
   redis:
     dsn: "redis://localhost:6379/0"
