@@ -81,7 +81,7 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	reqCC := parseCacheControl(r.Header.Values("Cache-Control"))
 
-	if !lookupAllowed(r, reqCC) {
+	if !lookupAllowed(reqCC) {
 		status.fwd = "request"
 		c.forward(w, r, key, "", reqCC, status, true, nil)
 		return
@@ -470,7 +470,7 @@ func await(ctx context.Context, done chan struct{}, timeout time.Duration) {
 func (c *cache) freshenWithHead(ctx context.Context, r *http.Request, reqCC cacheControl, key, field string, stored *entry, m *missHook) {
 	h := m.headHeader
 	if stored == nil {
-		if lookupAllowed(r, reqCC) {
+		if lookupAllowed(reqCC) {
 			return // the cache was read: it has no such response
 		}
 		e, f, _, err := c.find(ctx, key, r.Header, false)

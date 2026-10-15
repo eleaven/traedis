@@ -130,7 +130,6 @@ The request of the client says whether a stored response may answer it.
   - `max-stale=N`: accepts a response that is stale by less than `N` seconds; `max-stale` alone, by any time.
   - `only-if-cached`: never forwarded. When nothing stored can answer, it gets a `504` without `Cache-Status`. With `max-stale`, it is what
     an offline client sends.
-- `Pragma: no-cache`: like `Cache-Control: no-cache`, for a request without `Cache-Control`.
 - `If-None-Match`, `If-Modified-Since`: answered with a `304` when the stored response is the one the client
   [already has](#conditional-requests).
 - `Range`, `If-Range`: answered with the bytes asked for of the stored response ([range requests](#range-requests)).

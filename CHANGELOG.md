@@ -5,6 +5,14 @@ What each release changes for those who use the plugin, the latest first. The se
 
 <!-- One line per paragraph and per list item: GitHub keeps the line breaks of the text of a release. -->
 
+## v0.3.0
+
+The deprecated `Pragma` header field is no longer read.
+
+### ⚠️ Breaking changes
+
+- **`Pragma: no-cache` no longer bypasses the cache**: a request with it and without `Cache-Control` is now answered from the cache like any other. A client that must reach the backend sends `Cache-Control: no-cache`. RFC 9111 deprecates `Pragma` (§5.4).
+
 ## v0.2.1 – 2026-10-13
 
 No change to the plugin itself: this release is for its page in the [Traefik Plugin Catalog](https://plugins.traefik.io/plugins/6acde5da1c6f05d528c59972/traedis).

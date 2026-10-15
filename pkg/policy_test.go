@@ -233,16 +233,12 @@ func TestLookupAllowed(t *testing.T) {
 	}{
 		{name: "plain request", header: http.Header{}, want: true},
 		{name: "§5.2.1.4 request no-cache", header: http.Header{"Cache-Control": {"no-cache"}}, want: false},
-		{name: "§5.4 Pragma no-cache without Cache-Control", header: http.Header{"Pragma": {"no-cache"}}, want: false},
-		{name: "§5.4 Pragma ignored when Cache-Control is present", header: http.Header{"Pragma": {"no-cache"}, "Cache-Control": {"max-age=10"}}, want: true},
 		{name: "§5.2.1.5 request no-store may still be served", header: http.Header{"Cache-Control": {"no-store"}}, want: true},
 		{name: "§5.2.1.4 request no-cache has no qualified form", header: http.Header{"Cache-Control": {`no-cache="Set-Cookie"`}}, want: false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
-			req.Header = tt.header
-			if got := lookupAllowed(req, parseCacheControl(req.Header.Values("Cache-Control"))); got != tt.want {
+			if got := lookupAllowed(parseCacheControl(tt.header.Values("Cache-Control"))); got != tt.want {
 				t.Errorf("lookupAllowed() = %v, want %v", got, tt.want)
 			}
 		})

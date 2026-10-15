@@ -247,7 +247,6 @@ func TestRequestDirectives(t *testing.T) {
 		wantStatus string
 	}{
 		{name: "§5.2.1.4 no-cache forwards and refreshes", header: http.Header{"Cache-Control": {"no-cache"}}, wantCalls: 2, wantCode: 200, wantStatus: "traedis; fwd=request; fwd-status=200"},
-		{name: "§5.4 Pragma no-cache forwards", header: http.Header{"Pragma": {"no-cache"}}, wantCalls: 2, wantCode: 200, wantStatus: "traedis; fwd=request; fwd-status=200"},
 		{name: "§5.2.1.1 max-age=0 forwards", header: http.Header{"Cache-Control": {"max-age=0"}}, wantCalls: 2, wantCode: 200, wantStatus: "traedis; fwd=request; fwd-status=200"},
 		{name: "§5.2.1.3 min-fresh too large forwards", header: http.Header{"Cache-Control": {"min-fresh=3600"}}, wantCalls: 2, wantCode: 200, wantStatus: "traedis; fwd=request; fwd-status=200"},
 		{name: "§5.2.1.5 no-store may be served", header: http.Header{"Cache-Control": {"no-store"}}, wantCalls: 1, wantCode: 200, wantStatus: "hit"},

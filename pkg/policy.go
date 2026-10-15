@@ -368,18 +368,10 @@ func storeTTL(req *http.Request, reqCC cacheControl, e *entry, cc cacheControl, 
 }
 
 // lookupAllowed reports whether the request lets the cache answer from storage
-// (§5.2.1.4, §5.4). cc is its Cache-Control.
-func lookupAllowed(req *http.Request, cc cacheControl) bool {
-	if len(req.Header.Values("Cache-Control")) > 0 {
-		// no-cache has no qualified form in a request: an argument is ignored.
-		return !cc.noCache && len(cc.unstored) == 0
-	}
-	for _, p := range req.Header.Values("Pragma") {
-		if strings.Contains(strings.ToLower(p), "no-cache") {
-			return false
-		}
-	}
-	return true
+// (§5.2.1.4). cc is its Cache-Control.
+func lookupAllowed(cc cacheControl) bool {
+	// no-cache has no qualified form in a request: an argument is ignored.
+	return !cc.noCache && len(cc.unstored) == 0
 }
 
 // servable reports whether a stored response with the given age and lifetime is
@@ -479,7 +471,7 @@ func supersedes(e *entry, cc cacheControl, cfg settings) bool {
 // client's own copy of the response: a background revalidation fetches the
 // whole representation, whatever the client asked for.
 var clientOnly = []string{
-	"Cache-Control", "Pragma", "Range", "If-Range",
+	"Cache-Control", "Range", "If-Range",
 	"If-Match", "If-None-Match", "If-Modified-Since", "If-Unmodified-Since",
 }
 

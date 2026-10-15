@@ -1,4 +1,4 @@
-# Request directives (RFC 9111 §5.2.1, §5.4).
+# Request directives (RFC 9111 §5.2.1).
 
 # no-store (§5.2.1.5): the response is not stored
 GET {{base_url}}/whoami-cache?run={{run}}
@@ -32,13 +32,6 @@ header "Cache-Status" contains "traedis; hit; ttl="
 # no-cache (§5.2.1.4): the stored response is not used
 GET {{base_url}}/whoami-cache?run={{run}}
 Cache-Control: no-cache
-HTTP 200
-[Asserts]
-header "Cache-Status" contains "traedis; fwd=request; fwd-status=200"
-
-# Pragma: no-cache (§5.4), without Cache-Control: same as no-cache
-GET {{base_url}}/whoami-cache?run={{run}}
-Pragma: no-cache
 HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=request; fwd-status=200"
