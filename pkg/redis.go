@@ -123,7 +123,7 @@ func (c *redisClient) get(ctx context.Context, key string, fields []string) ([][
 	for _, f := range fields {
 		args = append(args, []byte(f))
 	}
-	r, err := do(ctx, c, args)
+	r, err := do(ctx, c, '*', args)
 	if err != nil {
 		if errors.Is(err, errTooLarge) {
 			// Not a value of ours: nothing usable is stored.
@@ -131,7 +131,7 @@ func (c *redisClient) get(ctx context.Context, key string, fields []string) ([][
 		}
 		return nil, err
 	}
-	if r.kind != '*' || len(r.items) != len(fields) {
+	if len(r.items) != len(fields) {
 		return nil, errProtocol
 	}
 	return r.items, nil
@@ -153,14 +153,8 @@ func (c *redisClient) set(ctx context.Context, key string, fields []fieldValue, 
 	for _, f := range fields {
 		args = append(args, []byte(f.name), f.value)
 	}
-	r, err := do(ctx, c, args)
-	if err != nil {
-		return err
-	}
-	if r.kind != ':' {
-		return errProtocol
-	}
-	return nil
+	_, err := do(ctx, c, ':', args)
+	return err
 }
 
 func (c *redisClient) expire(ctx context.Context, key, field string, ttl time.Duration) error {
@@ -168,38 +162,19 @@ func (c *redisClient) expire(ctx context.Context, key, field string, ttl time.Du
 	if ms <= 0 {
 		return nil
 	}
-	r, err := do(ctx, c, [][]byte{[]byte("HPEXPIRE"), []byte(key), []byte(strconv.FormatInt(ms, 10)),
+	_, err := do(ctx, c, '*', [][]byte{[]byte("HPEXPIRE"), []byte(key), []byte(strconv.FormatInt(ms, 10)),
 		[]byte("FIELDS"), []byte("1"), []byte(field)})
-	if err != nil {
-		return err
-	}
-	if r.kind != '*' {
-		return errProtocol
-	}
-	return nil
+	return err
 }
 
 func (c *redisClient) invalidate(ctx context.Context, key string) error {
-	r, err := do(ctx, c, [][]byte{[]byte("DEL"), []byte(key)})
-	if err != nil {
-		return err
-	}
-	if r.kind != ':' {
-		return errProtocol
-	}
-	return nil
+	_, err := do(ctx, c, ':', [][]byte{[]byte("DEL"), []byte(key)})
+	return err
 }
 
 func (c *redisClient) count(ctx context.Context, key string) (int, error) {
-	r, err := do(ctx, c, [][]byte{[]byte("HLEN"), []byte(key)})
-	if err != nil {
-		return 0, err
-	}
-	if r.kind != ':' {
-		return 0, errProtocol
-	}
-	n := int(r.num)
-	return n, nil
+	r, err := do(ctx, c, ':', [][]byte{[]byte("HLEN"), []byte(key)})
+	return int(r.num), err
 }
 
 func (c *redisClient) del(ctx context.Context, key string, fields []string) error {
@@ -208,18 +183,13 @@ func (c *redisClient) del(ctx context.Context, key string, fields []string) erro
 	for _, f := range fields {
 		args = append(args, []byte(f))
 	}
-	r, err := do(ctx, c, args)
-	if err != nil {
-		return err
-	}
-	if r.kind != ':' {
-		return errProtocol
-	}
-	return nil
+	_, err := do(ctx, c, ':', args)
+	return err
 }
 
-// do runs one command, within redis.timeout. Any failure but an error reply
-// closes the connection: its state is unknown. A command that fails on a
+// do runs one command, within redis.timeout, and expects a reply of the given
+// kind: any other one is errProtocol. Any failure but an error reply or a
+// reply of another kind closes the connection: its state is unknown. A command that fails on a
 // connection of the pool is run once more, on a new one (see stale).
 //
 // After redis.maxFailures failures in a row, Redis is given up on: commands
@@ -230,7 +200,7 @@ func (c *redisClient) del(ctx context.Context, key string, fields []string) erro
 // Like acquire, release and roundTrip, which run for every command too, it is
 // a function rather than a method of the client: under Yaegi, calling a method
 // costs several times what calling a function does.
-func do(ctx context.Context, c *redisClient, args [][]byte) (reply, error) {
+func do(ctx context.Context, c *redisClient, kind byte, args [][]byte) (reply, error) {
 	c.stateMu.Lock()
 	failures := c.failures
 	if c.opts.maxFailures > 0 && failures >= c.opts.maxFailures {
@@ -283,6 +253,9 @@ func do(ctx context.Context, c *redisClient, args [][]byte) (reply, error) {
 		err := redisError(r.str)
 		c.logError(err)
 		return reply{}, err
+	}
+	if r.kind != kind {
+		return reply{}, errProtocol
 	}
 	return r, nil
 }
