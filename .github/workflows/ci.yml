@@ -87,40 +87,33 @@ jobs:
       - if: always()
         run: docker compose down --volumes
 
-  # Release, on main only and once the tests pass: `detect-new-version` and `release` need
-  # `validate-version`, so they are skipped with it (pull requests, failed tests).
-
-  # Reads ./VERSION and fails when it is not a valid version
-  validate-version:
+  # Release, on main only and once the tests pass: the version of ./VERSION, when it is a new one, gets its tag and its
+  # GitHub release, with its notes from CHANGELOG.md
+  release:
     needs: [ unit, e2e ]
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.version.outputs.version }}
+    # One release at a time: two pushes must not race for the same tag
+    concurrency:
+      group: release
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v7
+
+      # 1. Read ./VERSION, and fail when it is not a valid version
       - name: Parse VERSION
-        id: version
         run: |
           version="$(<VERSION)"
           if [[ ! "$version" =~ $SEMVER ]]; then
             echo "::error file=VERSION::'$version' is not a valid version (expected vMAJOR.MINOR.PATCH, e.g. v1.2.3)"
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
 
-  # Is the version a new one, and does it follow the highest released one?
-  detect-new-version:
-    needs: validate-version
-    runs-on: ubuntu-latest
-    outputs:
-      new: ${{ steps.tags.outputs.new }}
-    steps:
-      - uses: actions/checkout@v7
+      # 2. Is the version a new one, and does it follow the highest released one? The next steps only run for a new one
       - name: Compare with the released versions
         id: tags
-        env:
-          VERSION: ${{ needs.validate-version.outputs.version }}
         run: |
           set -euo pipefail
 
@@ -148,35 +141,23 @@ jobs:
 
           echo "new=true" >> "$GITHUB_OUTPUT"
 
-  # Creates the tag and the GitHub release, with the notes of the version in CHANGELOG.md
-  release:
-    needs: [ validate-version, detect-new-version ]
-    if: needs.detect-new-version.outputs.new == 'true'
-    runs-on: ubuntu-latest
-    # One release at a time: two pushes must not race for the same tag
-    concurrency:
-      group: release
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v7
-      # The text of the release is the section of the version in CHANGELOG.md: what follows its `## vX.Y.Z` title,
-      # up to the next one
+      # 3. The text of the release is the section of the version in CHANGELOG.md: what follows its `## vX.Y.Z` title, up to
+      # the next one
       - name: Read the notes of the version in CHANGELOG.md
-        env:
-          VERSION: ${{ needs.validate-version.outputs.version }}
+        if: steps.tags.outputs.new == 'true'
         run: |
           awk -v version="$VERSION" '/^## / { found = ($2 == version); next } found' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
           if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
             echo "::error file=CHANGELOG.md::No section for $VERSION (expected a '## $VERSION' title followed by what the version changes)"
             exit 1
           fi
-      # With the GitHub CLI of the runner: no third-party action in the job that may write to the repository.
-      # --generate-notes adds the link to the comparison with the previous version after the notes
+
+      # 4. Create the tag and the release, with the GitHub CLI of the runner: no third-party action in the job, which may
+      # write to the repository. --generate-notes adds the link to the comparison with the previous version after the notes
       - name: Create the tag and the release
+        if: steps.tags.outputs.new == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.validate-version.outputs.version }}
         run: >-
           gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$VERSION"
           --notes "$(< "$RUNNER_TEMP/notes.md")" --generate-notes
