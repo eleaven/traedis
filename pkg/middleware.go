@@ -380,8 +380,7 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 	// then take the place of the conditions of the client (§4.3.1).
 	out, validating := backendRequest(r, stored)
 	m.validating = validating
-	rec := newRecorder(w, m, c.cfg.maxBodyBytes)
-	rec.bodies = c.bodies
+	rec := newRecorder(w, m, c.cfg.maxBodyBytes, c.bodies)
 	c.next.ServeHTTP(rec, out)
 	if !rec.wroteHeader {
 		rec.WriteHeader(http.StatusOK)

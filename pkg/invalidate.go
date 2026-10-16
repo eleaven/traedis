@@ -25,7 +25,7 @@ func (c *cache) invalidate(w http.ResponseWriter, r *http.Request) {
 	if c.cfg.exposeKey {
 		hook.status.key = key
 	}
-	rec := newRecorder(w, hook, 0)
+	rec := newRecorder(w, hook, 0, nil)
 	c.next.ServeHTTP(rec, r)
 	if !rec.wroteHeader && !rec.hijacked {
 		rec.WriteHeader(http.StatusOK)

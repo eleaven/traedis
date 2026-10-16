@@ -46,7 +46,7 @@ func (w *writerStub) Write(p []byte) (int, error) { return w.body.Write(p) }
 func TestRecorderCapturesBody(t *testing.T) {
 	rw := httptest.NewRecorder()
 	hook := &hookStub{capture: true}
-	rec := newRecorder(rw, hook, 1024)
+	rec := newRecorder(rw, hook, 1024, nil)
 
 	rec.Header().Set("Content-Type", "text/plain")
 	_, _ = rec.Write([]byte("hello "))
@@ -64,7 +64,7 @@ func TestRecorderCapturesBody(t *testing.T) {
 }
 
 func TestRecorderNoCaptureWhenHookDeclines(t *testing.T) {
-	rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: false}, 1024)
+	rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: false}, 1024, nil)
 	rec.WriteHeader(http.StatusNotFound)
 	_, _ = rec.Write([]byte("nope"))
 	if _, ok := rec.body(); ok {
@@ -74,7 +74,7 @@ func TestRecorderNoCaptureWhenHookDeclines(t *testing.T) {
 
 func TestRecorderWithholdsResponse(t *testing.T) {
 	rw := &writerStub{header: http.Header{}}
-	rec := newRecorder(rw, &hookStub{withhold: true}, 1024)
+	rec := newRecorder(rw, &hookStub{withhold: true}, 1024, nil)
 	rec.WriteHeader(http.StatusEarlyHints)
 	rec.WriteHeader(http.StatusServiceUnavailable)
 	n, err := rec.Write([]byte("unavailable"))
@@ -96,7 +96,7 @@ func TestRecorderWithholdsResponse(t *testing.T) {
 
 func TestRecorderStreamsBodiesLargerThanMax(t *testing.T) {
 	rw := httptest.NewRecorder()
-	rec := newRecorder(rw, &hookStub{capture: true}, 10)
+	rec := newRecorder(rw, &hookStub{capture: true}, 10, nil)
 	payload := strings.Repeat("x", 25)
 	for i := 0; i < len(payload); i += 5 {
 		_, _ = rec.Write([]byte(payload[i : i+5]))
@@ -114,7 +114,7 @@ func TestRecorderStreamsBodiesLargerThanMax(t *testing.T) {
 
 func TestRecorderSkipsCaptureForLargeContentLength(t *testing.T) {
 	rw := httptest.NewRecorder()
-	rec := newRecorder(rw, &hookStub{capture: true}, 10)
+	rec := newRecorder(rw, &hookStub{capture: true}, 10, nil)
 	rec.Header().Set("Content-Length", "11")
 	rec.WriteHeader(200)
 	if rec.capture {
@@ -126,7 +126,7 @@ func TestRecorderSkipsCaptureForLargeContentLength(t *testing.T) {
 // again and again as it grows.
 func TestRecorderAllocatesItsCopyOnce(t *testing.T) {
 	const size = 64 << 10
-	rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: true}, 1<<20)
+	rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: true}, 1<<20, nil)
 	rec.Header().Set("Content-Length", strconv.Itoa(size))
 	rec.WriteHeader(200)
 	allocated := rec.buf.Cap()
@@ -143,7 +143,7 @@ func TestRecorderAllocatesItsCopyOnce(t *testing.T) {
 
 	// Nothing is allocated from a Content-Length that is not a length.
 	for _, length := range []string{"-1", "0", "many", "99999999999999999999"} {
-		rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: true}, 1<<20)
+		rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: true}, 1<<20, nil)
 		rec.Header().Set("Content-Length", length)
 		rec.WriteHeader(200)
 		if rec.buf.Cap() != 0 {
@@ -169,7 +169,7 @@ func TestRecorderIncompleteBody(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rw := httptest.NewRecorder()
-			rec := newRecorder(rw, &hookStub{capture: true}, 1024)
+			rec := newRecorder(rw, &hookStub{capture: true}, 1024, nil)
 			if tt.contentLength != "" {
 				rec.Header().Set("Content-Length", tt.contentLength)
 			}
@@ -191,7 +191,7 @@ func TestRecorderIncompleteBody(t *testing.T) {
 func TestRecorderPassesInformationalResponses(t *testing.T) {
 	rw := &writerStub{header: http.Header{}}
 	hook := &hookStub{capture: true}
-	rec := newRecorder(rw, hook, 1024)
+	rec := newRecorder(rw, hook, 1024, nil)
 	rec.WriteHeader(http.StatusEarlyHints)
 	rec.WriteHeader(http.StatusOK)
 	rec.WriteHeader(http.StatusInternalServerError) // superfluous
@@ -208,7 +208,7 @@ func TestRecorderPassesInformationalResponses(t *testing.T) {
 // it wraps.
 func TestRecorderPreservesFlusher(t *testing.T) {
 	rw := httptest.NewRecorder()
-	rec := newRecorder(rw, &hookStub{}, 1024)
+	rec := newRecorder(rw, &hookStub{}, 1024, nil)
 	var w any = rec
 	f, ok := w.(http.Flusher)
 	if !ok {
@@ -241,7 +241,7 @@ func TestRecorderFlushes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rw := httptest.NewRecorder()
-			rec := newRecorder(rw, &hookStub{capture: tt.capture}, 1024)
+			rec := newRecorder(rw, &hookStub{capture: tt.capture}, 1024, nil)
 			if tt.contentLength != "" {
 				rec.Header().Set("Content-Length", tt.contentLength)
 			}
@@ -271,7 +271,7 @@ func TestRecorderFlushes(t *testing.T) {
 // Nothing of a withheld response is sent: it is not flushed either.
 func TestRecorderDoesNotFlushWithheldResponse(t *testing.T) {
 	rw := httptest.NewRecorder()
-	rec := newRecorder(rw, &hookStub{withhold: true}, 1024)
+	rec := newRecorder(rw, &hookStub{withhold: true}, 1024, nil)
 	rec.WriteHeader(http.StatusServiceUnavailable)
 	_, _ = rec.Write([]byte("unavailable"))
 	rec.Flush()
@@ -283,7 +283,7 @@ func TestRecorderDoesNotFlushWithheldResponse(t *testing.T) {
 func TestRecorderPreservesHijacker(t *testing.T) {
 	recCh := make(chan *recorder, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		rec := newRecorder(w, &hookStub{capture: true}, 1024)
+		rec := newRecorder(w, &hookStub{capture: true}, 1024, nil)
 		recCh <- rec
 		var rw http.ResponseWriter = rec
 		hj, ok := rw.(http.Hijacker)
@@ -326,7 +326,7 @@ func TestRecorderPreservesHijacker(t *testing.T) {
 
 func TestRecorderPreservesTrailers(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		rec := newRecorder(w, &hookStub{capture: true}, 1024)
+		rec := newRecorder(w, &hookStub{capture: true}, 1024, nil)
 		rec.Header().Set("Trailer", "X-Checksum")
 		_, _ = rec.Write([]byte("body"))
 		rec.Header().Set("X-Checksum", "abc")

@@ -61,8 +61,7 @@ func (c *cache) refresh(req *http.Request, key, field string, e *entry) {
 	m.revalidation = true
 	out, validating := backendRequest(req, e)
 	m.validating = validating
-	rec := newRecorder(&nullWriter{header: http.Header{}}, m, c.cfg.maxBodyBytes)
-	rec.bodies = c.bodies
+	rec := newRecorder(&nullWriter{header: http.Header{}}, m, c.cfg.maxBodyBytes, c.bodies)
 	defer rec.release()
 	c.next.ServeHTTP(rec, out)
 	if !rec.wroteHeader {

@@ -54,8 +54,8 @@ type recorder struct {
 	held   int64
 }
 
-func newRecorder(rw http.ResponseWriter, hook headerHook, max int64) *recorder {
-	return &recorder{rw: rw, hook: hook, max: max}
+func newRecorder(rw http.ResponseWriter, hook headerHook, max int64, bodies *budget) *recorder {
+	return &recorder{rw: rw, hook: hook, max: max, bodies: bodies}
 }
 
 func (r *recorder) Header() http.Header {

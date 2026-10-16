@@ -65,8 +65,7 @@ func TestHoldCopy(t *testing.T) {
 // A copy that stops is given back at once, not when its response ends: that
 // may be long after, for a stream.
 func TestStoppedCopyIsGivenBack(t *testing.T) {
-	rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: true}, 100<<10)
-	rec.bodies = &budget{max: 1 << 20}
+	rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: true}, 100<<10, &budget{max: 1 << 20})
 	chunk := []byte(strings.Repeat("x", 40<<10))
 	_, _ = rec.Write(chunk)
 	_, _ = rec.Write(chunk)
