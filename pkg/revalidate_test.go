@@ -270,12 +270,7 @@ func (b *gatedBackend) count() int {
 
 func TestRevalidationIsNotRepeatedWhileRunning(t *testing.T) {
 	b := &gatedBackend{gate: make(chan struct{})}
-	s, err := parseConfig(CreateConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	st := newMemStore()
-	c := newCache(b, "cache", s, st)
+	c, st := newTestCache(t, b, nil)
 	storeAged(t, st, "max-age=60, stale-while-revalidate=30", 70*time.Second)
 
 	for i := 0; i < 3; i++ {
@@ -348,12 +343,7 @@ func (panicBackend) ServeHTTP(_ http.ResponseWriter, _ *http.Request) {
 }
 
 func TestRevalidationPanicIsRecovered(t *testing.T) {
-	s, err := parseConfig(CreateConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	st := newMemStore()
-	c := newCache(panicBackend{}, "cache", s, st)
+	c, st := newTestCache(t, panicBackend{}, nil)
 	storeAged(t, st, "max-age=60, stale-while-revalidate=30", 70*time.Second)
 
 	rec := doRequest(c, http.MethodGet, staleURL, nil)

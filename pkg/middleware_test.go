@@ -1005,13 +1005,10 @@ func TestBodyOfAnotherResponseIsNotServed(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s, err := parseConfig(CreateConfig())
-			if err != nil {
-				t.Fatal(err)
-			}
 			o := newOrigin()
-			st := &changingStore{memStore: newMemStore()}
-			c := newCache(o, "cache", s, st)
+			c, mem := newTestCache(t, o, nil)
+			st := &changingStore{memStore: mem}
+			c.store = st
 			doRequest(c, http.MethodGet, testURL, nil)
 
 			o.etag = `"v3"`
@@ -1106,16 +1103,10 @@ func (s *gatedStore) set(ctx context.Context, key string, fields []fieldValue, t
 
 func newGatedCache(t *testing.T, b http.Handler, mutate func(*Config)) (*cache, *gatedStore) {
 	t.Helper()
-	cfg := CreateConfig()
-	if mutate != nil {
-		mutate(cfg)
-	}
-	s, err := parseConfig(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st := &gatedStore{memStore: newMemStore(), gate: make(chan struct{})}
-	return newCache(b, "cache", s, st), st
+	c, mem := newTestCache(t, b, mutate)
+	st := &gatedStore{memStore: mem, gate: make(chan struct{})}
+	c.store = st
+	return c, st
 }
 
 // serve makes a request without waiting for what its response has to store.

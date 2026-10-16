@@ -926,12 +926,9 @@ func TestSaveVariantStopsOnRedisError(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			s, err := parseConfig(CreateConfig())
-			if err != nil {
-				t.Fatal(err)
-			}
-			st := &failingStore{memStore: newMemStore()}
-			c := newCache(&negotiator{}, "cache", s, st)
+			c, mem := newTestCache(t, &negotiator{}, nil)
+			st := &failingStore{memStore: mem}
+			c.store = st
 			tt.fail(st)
 
 			v := variant{names: []string{"Accept-Encoding"}, field: "f", coding: "br", accepted: []string{"br"}}

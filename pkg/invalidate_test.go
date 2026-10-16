@@ -173,12 +173,7 @@ func TestInvalidationFailsOpen(t *testing.T) {
 }
 
 func TestInvalidationPreservesHijacker(t *testing.T) {
-	st := newMemStore()
-	s, err := parseConfig(CreateConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := newCache(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	c, st := newTestCache(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		hj, ok := w.(http.Hijacker)
 		if !ok {
 			t.Error("the writer of an unsafe request must implement http.Hijacker")
@@ -193,7 +188,7 @@ func TestInvalidationPreservesHijacker(t *testing.T) {
 		defer conn.Close()
 		_, _ = buf.WriteString("HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nhijacked")
 		_ = buf.Flush()
-	}), "cache", s, st)
+	}), nil)
 	srv := httptest.NewServer(c)
 	defer srv.Close()
 
@@ -222,17 +217,13 @@ func TestInvalidationPreservesHijacker(t *testing.T) {
 // when the handler returns.
 func TestUnsafeResponseStreams(t *testing.T) {
 	release := make(chan struct{})
-	s, err := parseConfig(CreateConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
 	// The handler never flushes, as compiled code that cannot see Flush.
-	c := newCache(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	c, _ := newTestCache(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/x-ndjson")
 		_, _ = io.WriteString(w, "first\n")
 		<-release
 		_, _ = io.WriteString(w, "second\n")
-	}), "cache", s, newMemStore())
+	}), nil)
 	srv := httptest.NewServer(onlyWriter{c})
 	defer srv.Close()
 	defer close(release)
