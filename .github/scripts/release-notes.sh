@@ -1,17 +1,16 @@
 #!/usr/bin/env bash
-# Writes to <file> the notes of a version for the release job of ci.yml: its section in CHANGELOG.md, what follows
-# its `## vX.Y.Z` title up to the next one. Fails when there is none.
+# Prints the notes of a version for the release job of ci.yml: its section in CHANGELOG.md, what follows its
+# `## vX.Y.Z` title up to the next one. Fails when there is none.
 #
 # CHANGELOG.md is Markdown, whose line breaks inside a paragraph are spaces; GitHub keeps them in the text of a
 # release. So the lines of each paragraph, list item and quote are joined, but for a hard break (a line ending with
 # a backslash or two spaces). Code blocks, headings, tables and HTML are left as they are.
 #
-#   .github/scripts/release-notes.sh <version> <file>
+#   .github/scripts/release-notes.sh <version>
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 version="$1"
-notes="$2"
 
 # The lines that join_lines tells apart
 fence='^ *(```|~~~)'                 # opens or closes a code block
@@ -79,8 +78,10 @@ flush() {
   held=""
 }
 
-section | join_lines >"$notes"
-if ! grep -q '[^[:space:]]' "$notes"; then
-  echo "::error file=CHANGELOG.md::No section for $version (expected a '## $version' title followed by what the version changes)"
+notes="$(section | join_lines)"
+if [[ ! "$notes" =~ [^[:space:]] ]]; then
+  # On stderr: stdout is the notes
+  echo "::error file=CHANGELOG.md::No section for $version (expected a '## $version' title followed by what the version changes)" >&2
   exit 1
 fi
+printf '%s\n' "$notes"
