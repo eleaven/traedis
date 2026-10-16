@@ -468,6 +468,8 @@ func (c *cache) later(key string, held int64, write func(ctx context.Context)) {
 	go c.write(key, p, write)
 }
 
+// write runs write for later. A method rather than a closure started by later:
+// with the closure, the tests hang under Yaegi v0.16.1.
 func (c *cache) write(key string, p *pendingWrite, write func(ctx context.Context)) {
 	defer c.written(key, p)
 	write(context.Background())
