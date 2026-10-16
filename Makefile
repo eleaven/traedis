@@ -1,6 +1,6 @@
 # @see: https://stackoverflow.com/a/70550568
 MAKEFLAGS += --no-print-directory
-.PHONY: help start stop reset unwatch test unit fuzz e2e bench bench-view assets
+.PHONY: help start stop reset unwatch test unit fuzz e2e bench assets
 
 # Services the tests and benchmarks need: the whole stack but Redis Insight
 TEST_STACK := ingress cache cache-tls whoami placeholder imaging
@@ -57,10 +57,6 @@ e2e: stop ## Run end-to-end tests (Hurl through Traefik)
 
 bench: stop ## Run benchmarks (under Yaegi, then k6 through Traefik) into benchmark/results.json
 	$(down_on_exit); docker compose up -d --wait --wait-timeout 120 $(TEST_STACK) && ./benchmark/run.sh
-
-bench-view: ## Show benchmark/results.json as tables → http://localhost:8082/visualizer.html (Ctrl-C to stop)
-	@echo "http://localhost:8082/visualizer.html"
-	-docker compose run --rm --service-ports visualizer
 
 assets: ## Optimize icon.svg with SVGO and generate icon.png
 	@echo "Optimize SVG…"

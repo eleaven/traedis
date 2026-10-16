@@ -10,15 +10,3 @@ services:
     environment:
       - LOAD_VUS
       - LOAD_SECONDS
-
-  # Serves benchmark/ for visualizer.html, which reads results.json → http://localhost:8082/visualizer.html
-  # Started by `make bench-view`
-  visualizer:
-    image: busybox:1.37
-    profiles: [ bench ]
-    command: httpd -f -p 80 -h /benchmark
-    init: true # stops on Ctrl-C
-    ports:
-      - "127.0.0.1:8082:80"
-    volumes:
-      - ./:/benchmark:ro

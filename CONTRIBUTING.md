@@ -12,7 +12,7 @@ pkg/               # the plugin (package `traedis`): one concern per file, with 
   redis.go         #   the Redis client: RESP and connection pool
 example/           # Traefik configuration of the local stack: one dynamic file per sample backend
 e2e/               # end-to-end tests: Hurl files requesting Traefik
-benchmark/         # benchmarks under Yaegi, k6 load test, results viewer
+benchmark/         # benchmarks under Yaegi, k6 load test, report for the CI
 compose.yml        # local stack: Traefik, Redis, sample backends (whoami, placeholder, imgproxy), Redis Insight
 .traefik.yml       # plugin manifest of the Traefik Plugin Catalog
 VERSION            # the version to release
@@ -28,7 +28,7 @@ make test        # all the tests the CI requires: `make unit`, then `make e2e`
 make unit        # gofmt, go vet, go test -race, then the same tests under Yaegi, with a Redis for the integration tests
 make fuzz        # each fuzzer of pkg/fuzz_test.go for 30 s (FUZZTIME=5m for longer)
 make e2e         # end-to-end tests, through Traefik
-make bench       # benchmarks → benchmark/results.json (`make bench-view` shows them)
+make bench       # benchmarks → benchmark/results.json (the CI shows them in the summary of its run)
 make help        # list all targets
 ```
 
