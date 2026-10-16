@@ -7,7 +7,7 @@ What each release changes for those who use the plugin, the latest first. The se
 
 ## v0.3.0
 
-Remove deprecated header fields and fix security issues.
+Security fixes, and a cache that stores more by default. Clients can no longer poison the cache with the content of a `GET`, remove a stored response through its background refresh, nor make Traefik hold as much memory as they want. Redirections are now stored by default, `statusCodes` takes ranges, and the deprecated `Pragma` header field is no longer read: see the breaking changes before upgrading.
 
 ### ⚠️ Breaking changes
 
