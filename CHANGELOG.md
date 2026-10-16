@@ -12,11 +12,12 @@ Remove deprecated header fields and fix security issues.
 ### ⚠️ Breaking changes
 
 - **`Pragma: no-cache` no longer bypasses the cache**: a request with it and without `Cache-Control` is now answered from the cache like any other. A client that must reach the backend sends `Cache-Control: no-cache`. RFC 9111 deprecates `Pragma` (§5.4).
+- **Redirections are stored by default**: `statusCodes` is now `["200-399"]` (it was `[200]`), so that the cache keeps what the backend allows but its errors. A `301` or a `308` is stored for `defaultTtl` even without `Cache-Control`; a `302`, `303` or `307` only with explicit freshness. A backend that sends the same `Cache-Control: public` on all its responses, its redirection to its login page included, has to send `private` with it, or the configuration has to set `statusCodes: ["200-299"]`, or `["200"]` as before.
 - **A `maxBodyBytes` over 64 MiB needs a `maxBufferedBytes` as large**: the new option bounds the bodies held in memory, and must leave room for the largest one. Without it, the middleware is refused when Traefik creates it.
 
 ### Features
 
-- **Ranges in `statusCodes`**: `["200", "400-499"]` allows a `200` and any `4xx` to be stored, as the `errors` middleware of Traefik writes its ranges. A range keeps out the codes that are never stored (`206`, `304`), but one with none that can be (`100-199`) is refused. The codes written as numbers (`[200, 404]`) still work.
+- **Ranges in `statusCodes`**: `["200-399", "404"]` allows any `2xx` or `3xx` and a `404` to be stored, as the `errors` middleware of Traefik writes its ranges. A range keeps out the codes that are never stored (`206`, `304`), but one with none that can be (`100-199`) is refused. The codes written as numbers (`[200, 404]`) still work.
 
 ### Security
 

@@ -78,7 +78,7 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `redis.timeout`                | `1s`                   | Maximum time for a whole Redis operation, getting the connection and transferring a body included. Past it, the cache is bypassed.             |
 | `redis.maxFailures`            | `5`                    | Failures in a row after which Redis is [no longer asked](#redis-failures). `0`: every request tries it.                                        |
 | `redis.retryAfter`             | `1s`                   | How often Redis is tried again once it is no longer asked.                                                                                     |
-| `statusCodes`                  | `["200"]`              | Codes (`404`) and ranges (`400-499`) that may be stored. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable. |
+| `statusCodes`                  | `["200-399"]`          | Codes (`404`) and ranges (`400-499`) that may be stored. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable. |
 | `defaultTtl`                   | `5m`                   | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires`. `0` disables it.                                                       |
 | `staleTtl`                     | `1h`                   | How long an entry is kept in Redis after it expires: the upper bound of every [stale response](#stale-responses). `0` disables them.           |
 | `defaultStaleWhileRevalidate`  | `0s`                   | `stale-while-revalidate` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                              |
@@ -347,7 +347,11 @@ A shared cache gives the response made for one client to all the others. The def
   `?x=1`, `?x=2`… store the same response again and again, each one up to `maxBodyBytes` and for its freshness plus `staleTtl`. Nothing
   bounds the number of URLs: a client can fill Redis with entries that nobody asks for again (flooding), which then take the place of the
   useful ones (pollution). Give Redis a `maxmemory` with the `allkeys-lfu` policy, so that entries requested once are evicted first, and
-  have the backend refuse or redirect the URLs it does not know: with the default `statusCodes`, only a `200` is stored.
+  have the backend refuse the URLs it does not know: with the default `statusCodes`, no error is stored. A redirection is: a `301` or a
+  `308` for `defaultTtl` even without `Cache-Control`, a `302`, `303` or `307` only with `s-maxage`, `max-age` or `Expires`.
+- **Redirections are shared too.** A backend that sends the same `Cache-Control: public, max-age=…` on all its responses has its
+  redirection of anonymous clients to its login page stored, then served to the clients that are logged in. Have it send `private` or
+  `no-store` with what depends on the client, redirections included, or leave `3xx` out of `statusCodes` (`["200-299"]`).
 - **Redis is trusted.** Whoever writes to it chooses what clients are served, and whoever reads it gets the stored responses: keep it for
   the cache only. With `redis://`, the connection is not encrypted, password included: keep it on a private network, or use `rediss://`.
 

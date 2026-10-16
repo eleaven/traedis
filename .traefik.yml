@@ -18,7 +18,7 @@ testData:
     tls:
       ca: ""
       insecureSkipVerify: false
-  statusCodes: [ 200 ]
+  statusCodes: [ "200-399" ]
   defaultTtl: 5m
   staleTtl: 1h
   defaultStaleWhileRevalidate: 0s

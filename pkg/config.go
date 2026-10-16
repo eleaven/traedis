@@ -68,7 +68,7 @@ func CreateConfig() *Config {
 			MaxFailures: 5,
 			RetryAfter:  "1s",
 		},
-		StatusCodes:                 []string{"200"},
+		StatusCodes:                 []string{"200-399"},
 		DefaultTTL:                  "5m",
 		StaleTTL:                    "1h",
 		DefaultStaleWhileRevalidate: "0s",

@@ -36,7 +36,7 @@ HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=200"
 
-# statusCodes (200 only): the error of a missing source image is not stored
+# statusCodes (200-399 by default): the error of a missing source image is not stored
 GET {{base_url}}/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3000/missing@avif?run={{run}}
 HTTP 404
 [Asserts]
@@ -47,7 +47,7 @@ HTTP 404
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=404"
 
-# statusCodes with a range (200 and 400-499): the same error is stored, and served from the cache
+# statusCodes with 404 listed: the same error is stored, and served from the cache
 GET {{base_url}}/imaging-cache-errors/unsafe/rs:fill:300:200/plain/http://placeholder:3000/missing@avif?run={{run}}
 HTTP 404
 [Asserts]
