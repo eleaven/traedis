@@ -136,6 +136,8 @@ The request of the client says whether a stored response may answer it.
 - `Cookie`: not part of the cache key, see [Security](#security).
 - `Accept-Encoding`, and the header fields that `Vary` names: choose the [variant](#variants).
 - `Upgrade`, `Accept: text/event-stream`: forwarded untouched (WebSockets, server-sent events).
+- `Content-Length`, `Transfer-Encoding`: a `GET` or `HEAD` with content is forwarded untouched, and its response is not stored. Some
+  backends read parameters in it, which the cache key does not have.
 
 ### Added by Traedis
 
@@ -155,7 +157,7 @@ Traedis adds these to the responses it sends to the client, and to the requests 
   - `fwd=stale; fwd-status=304; ttl=N`: [validated](#conditional-requests) by the backend, the stored response is
     served, fresh for `N` seconds again.
   - `fwd=stale; fwd-status=503; ttl=-N; detail=stale-if-error`: the backend failed, the stored response is served in place of its error.
-  - `fwd=bypass`: forwarded untouched, WebSocket upgrade or server-sent events.
+  - `fwd=bypass`: forwarded untouched, WebSocket upgrade, server-sent events or request with content.
   - `fwd=bypass; detail=redis`: forwarded, Redis [failed, timed out or is no longer asked](#redis-failures).
   - `fwd=method`: forwarded, `OPTIONS`, `TRACE` or an unsafe method.
   - `fwd=method; detail=invalidated`: unsafe method, the stored responses of the URL were [removed](#invalidation-by-unsafe-methods)
@@ -179,8 +181,8 @@ A response is stored once it is sent: its client never waits for Redis. The next
 `redis.dialTimeout`, so that a miss is followed by a hit. No more responses are being stored at a time than `redis.poolSize`, and one per
 URL: past that, a response is not stored, and the next one for its URL is.
 
-`OPTIONS`, `TRACE`, WebSocket upgrades and `Accept: text/event-stream` requests are forwarded as is. So are unsafe methods (`POST`, `PUT`,
-`DELETE`…), which [invalidate](#invalidation-by-unsafe-methods) what is stored.
+`OPTIONS`, `TRACE`, WebSocket upgrades, `Accept: text/event-stream` requests and requests with content are forwarded as is. So are
+unsafe methods (`POST`, `PUT`, `DELETE`…), which [invalidate](#invalidation-by-unsafe-methods) what is stored.
 
 The Redis key is `traedis:<middleware>:<hash of the URL>`, with the name Traefik gives the middleware (`cache@file`). The routers that use
 the same middleware share its stored responses, in all the Traefik instances; two middlewares never do, even in the same Redis database

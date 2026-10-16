@@ -24,6 +24,15 @@ HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=bypass"
 
+# Requests with content (RFC 9110 §9.3.1): the backend may read parameters in it, which the cache key does not have
+GET {{base_url}}/whoami-cache?run={{run}}
+```
+q=other
+```
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=bypass"
+
 # Unsafe methods, last: a successful one invalidates what was stored
 POST {{base_url}}/whoami-cache?run={{run}}
 HTTP 200

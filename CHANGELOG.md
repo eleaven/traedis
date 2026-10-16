@@ -13,6 +13,10 @@ The deprecated `Pragma` header field is no longer read.
 
 - **`Pragma: no-cache` no longer bypasses the cache**: a request with it and without `Cache-Control` is now answered from the cache like any other. A client that must reach the backend sends `Cache-Control: no-cache`. RFC 9111 deprecates `Pragma` (§5.4).
 
+### Security
+
+- **A `GET` with content could poison the cache.** Its content is not part of the cache key, but some backends read parameters in it: what they answered was stored and served to the other clients of the URL. A `GET` or `HEAD` with content (`Content-Length` or `Transfer-Encoding`) is now forwarded untouched, with `Cache-Status: traedis; fwd=bypass`: it is not answered from the cache, and its response is not stored.
+
 ## v0.2.1 – 2026-10-13
 
 No change to the plugin itself: this release is for its page in the [Traefik Plugin Catalog](https://plugins.traefik.io/plugins/6acde5da1c6f05d528c59972/traedis).

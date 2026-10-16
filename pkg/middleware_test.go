@@ -735,6 +735,52 @@ func TestPassThroughDoesNotWrapWriter(t *testing.T) {
 	}
 }
 
+// RFC 9110 §9.3.1: some backends read the content of a GET, which is not part
+// of the cache key. Such a request must neither store what it gets nor be
+// answered with what another one stored.
+func TestRequestWithBodyBypassesCache(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		length int64 // -1: chunked
+	}{
+		{name: "GET with Content-Length", method: http.MethodGet, length: 4},
+		{name: "chunked GET", method: http.MethodGet, length: -1},
+		{name: "HEAD with Content-Length", method: http.MethodHead, length: 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// The backend answers with the parameters it reads from the content.
+			calls := 0
+			c, st := newTestCache(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				params, _ := io.ReadAll(r.Body)
+				w.Header().Set("Cache-Control", "max-age=60")
+				_, _ = io.WriteString(w, "hello "+string(params))
+			}), nil)
+			doRequest(c, http.MethodGet, testURL, nil)
+
+			req := httptest.NewRequest(tt.method, testURL, strings.NewReader("evil"))
+			req.ContentLength = tt.length
+			rec := httptest.NewRecorder()
+			c.ServeHTTP(rec, req)
+			settle(c)
+			if calls != 2 {
+				t.Errorf("backend calls = %d, want 2: a request with content is forwarded", calls)
+			}
+			if got := rec.Header().Values("Cache-Status"); len(got) != 1 || got[0] != "traedis; fwd=bypass" {
+				t.Errorf("Cache-Status = %q", got)
+			}
+			if st.sets != 1 {
+				t.Errorf("sets = %d, want 1: the response to a request with content is not stored", st.sets)
+			}
+			if rec := doRequest(c, http.MethodGet, testURL, nil); rec.Body.String() != "hello " || !strings.HasPrefix(lastCacheStatus(rec), "traedis; hit") {
+				t.Errorf("after it: got %q, Cache-Status = %q", rec.Body.String(), lastCacheStatus(rec))
+			}
+		})
+	}
+}
+
 // A response to a GET reaches the client as it is written, not when the
 // handler returns, whether the cache keeps a copy of it or not: under Yaegi
 // v0.16.1 the backend cannot flush the writer the cache wraps.

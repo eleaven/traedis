@@ -69,7 +69,7 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		c.passThrough(w, r, "method")
 		return
 	}
-	if expectsStream(r) {
+	if expectsStream(r) || hasBody(r) {
 		c.passThrough(w, r, "bypass")
 		return
 	}
@@ -266,6 +266,14 @@ func expectsStream(r *http.Request) bool {
 		}
 	}
 	return false
+}
+
+// hasBody reports whether a request has content: a length, or chunks (-1). In
+// a GET or a HEAD, it has no defined semantics (RFC 9110 §9.3.1), but some
+// backends read parameters in it, which the cache key does not have: such a
+// request is neither answered from the cache nor has its response stored.
+func hasBody(r *http.Request) bool {
+	return r.ContentLength != 0
 }
 
 // serve answers from a stored entry (§4), fresh or stale: with a 304 when the
