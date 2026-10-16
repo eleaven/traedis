@@ -22,8 +22,8 @@ const BACKENDS = {
   placeholder: { direct: '/placeholder/600x400', cached: '/placeholder-cache/600x400', params: [] },
   // imgproxy converting a placeholder image to AVIF, with max-age: a costly service (it ignores the query).
   imaging: {
-    direct: '/imaging/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif',
-    cached: '/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif',
+    direct: '/imaging/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif',
+    cached: '/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif',
     params: [],
   },
 };

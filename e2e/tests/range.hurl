@@ -1,6 +1,6 @@
 # Range requests (RFC 9110 §14): the cache answers with the bytes asked for, from the whole response it stored.
 
-GET {{base_url}}/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
+GET {{base_url}}/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
 [Options]
 variable: run={{newUuid}}
 HTTP 200
@@ -9,14 +9,14 @@ etag: header "ETag"
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=200"
 
-GET {{base_url}}/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
+GET {{base_url}}/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
 HTTP 200
 [Captures]
 length: header "Content-Length"
 [Asserts]
 header "Cache-Status" contains "traedis; hit; ttl="
 
-GET {{base_url}}/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
+GET {{base_url}}/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
 Range: bytes=4-11
 HTTP 206
 [Asserts]
@@ -29,7 +29,7 @@ header "ETag" == {{etag}}
 bytes == hex,6674797061766966;
 
 # If-Range with the stored entity tag
-GET {{base_url}}/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
+GET {{base_url}}/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
 Range: bytes=4-11
 If-Range: {{etag}}
 HTTP 206
@@ -38,7 +38,7 @@ header "Cache-Status" contains "traedis; hit; ttl="
 bytes count == 8
 
 # With another one: the whole response
-GET {{base_url}}/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
+GET {{base_url}}/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
 Range: bytes=4-11
 If-Range: "another"
 HTTP 200
@@ -47,7 +47,7 @@ header "Cache-Status" contains "traedis; hit; ttl="
 header "Content-Length" == "{{length}}"
 
 # The condition of the client comes first
-GET {{base_url}}/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
+GET {{base_url}}/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
 Range: bytes=4-11
 If-None-Match: {{etag}}
 HTTP 304
@@ -55,7 +55,7 @@ HTTP 304
 header "Cache-Status" contains "traedis; hit; ttl="
 
 # No such bytes
-GET {{base_url}}/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
+GET {{base_url}}/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
 Range: bytes=99999999-
 HTTP 416
 [Asserts]

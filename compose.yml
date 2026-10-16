@@ -95,12 +95,18 @@ services:
   placeholder:
     image: ghcr.io/open-placeholder/open-placeholder:sha-8a81d5c
 
-  # Image processing backend (imgproxy, unsigned URLs) fetching its images from placeholder: a costly response
-  # → http://localhost:8080/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif
-  # (/imaging/…: without the cache)
+  # Image processing backend (imgproxy) fetching its images from placeholder: a costly response
+  # → http://localhost:8080/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif
+  # (/imaging/…: without the cache). Its URLs are signed, as in production: any other one gets a 403. To sign another path:
+  #   path=/rs:fill:300:200/plain/http://placeholder:3000/800x600@avif
+  #   { xxd -r -p <<< "$IMGPROXY_SALT"; printf %s "$path"; } \
+  #     | openssl dgst -sha256 -mac HMAC -macopt "hexkey:$IMGPROXY_KEY" -binary | basenc --base64url | tr -d =
   imaging:
     image: ghcr.io/imgproxy/imgproxy:v3
     environment:
+      # Public, for this local stack only: in production, they are secrets
+      IMGPROXY_KEY: 55019804a9d53ce94eae236826ef7ec904fb49992e64c0edacc386a91fc0faf5
+      IMGPROXY_SALT: b94fa6337853288c8b36abfdad5dab013014bbc82007c7fe3f58b2a4a6a9d7f3
       IMGPROXY_LOG_LEVEL: debug
       IMGPROXY_DEVELOPMENT_ERRORS_MODE: "true"
       IMGPROXY_USE_ETAG: "true" # answers 304 to If-None-Match → http://localhost:8080/imaging-validate/… (fresh for 2s)

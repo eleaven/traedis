@@ -57,14 +57,14 @@ HTTP 200
 header "Cache-Status" contains "traedis; hit; ttl="
 
 # max-stale (§5.2.1.2): the client accepts a stale response. /imaging-validate is fresh for 2 seconds
-GET {{base_url}}/imaging-validate/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?maxstale={{run}}
+GET {{base_url}}/imaging-validate/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?maxstale={{run}}
 HTTP 200
 [Captures]
 body_hash: sha256
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=200"
 
-GET {{base_url}}/imaging-validate/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?maxstale={{run}}
+GET {{base_url}}/imaging-validate/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?maxstale={{run}}
 Cache-Control: max-stale
 [Options]
 delay: 3s
@@ -75,14 +75,14 @@ header "Age" toInt >= 2
 sha256 == {{body_hash}}
 
 # With only-if-cached: what an offline client asks
-GET {{base_url}}/imaging-validate/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?maxstale={{run}}
+GET {{base_url}}/imaging-validate/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?maxstale={{run}}
 Cache-Control: only-if-cached, max-stale=60
 HTTP 200
 [Asserts]
 header "Cache-Status" matches /^traedis; hit; ttl=-\d+; detail=max-stale$/
 
 # Staler than the client accepts: the backend is asked
-GET {{base_url}}/imaging-validate/unsafe/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?maxstale={{run}}
+GET {{base_url}}/imaging-validate/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?maxstale={{run}}
 Cache-Control: max-stale=0
 HTTP 200
 [Asserts]
