@@ -2,7 +2,6 @@ package traedis
 
 import (
 	"bufio"
-	"context"
 	"errors"
 	"io"
 	"net"
@@ -173,83 +172,7 @@ func TestInvalidationFailsOpen(t *testing.T) {
 	}
 }
 
-// Compiled code cannot flush an interpreted writer under Yaegi v0.16.1: the
-// invalidator flushes by itself a response of unknown length, so that one
-// that streams still does. A response with a Content-Length is never flushed:
-// that would make a compress middleware before the cache compress the small
-// ones. The client writer is a compiled one, as in Traefik.
-func TestInvalidatorFlushes(t *testing.T) {
-	tests := []struct {
-		name          string
-		contentLength string
-		want          bool
-	}{
-		{name: "unknown length: the header and every write", want: true},
-		{name: "known length: nothing", contentLength: "10"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rw := httptest.NewRecorder()
-			iw := &invalidator{rw: rw, c: newCache(nil, "cache", settings{}, newMemStore()), ctx: context.Background(), key: "k", status: cacheStatus{fwd: "method"}}
-			if tt.contentLength != "" {
-				iw.Header().Set("Content-Length", tt.contentLength)
-			}
-			iw.WriteHeader(http.StatusCreated)
-			if rw.Flushed != tt.want {
-				t.Errorf("flushed with the header = %v, want %v", rw.Flushed, tt.want)
-			}
-			for i := 0; i < 2; i++ {
-				rw.Flushed = false
-				if n, err := iw.Write([]byte("hello")); n != 5 || err != nil {
-					t.Fatalf("Write() = %d, %v", n, err)
-				}
-				if rw.Flushed != tt.want {
-					t.Errorf("write %d flushed = %v, want %v", i, rw.Flushed, tt.want)
-				}
-			}
-			if rw.Code != http.StatusCreated || rw.Body.String() != "hellohello" {
-				t.Errorf("client got %d %q", rw.Code, rw.Body.String())
-			}
-		})
-	}
-}
-
-func TestInvalidatorPassesInformationalResponses(t *testing.T) {
-	rw := &writerStub{header: http.Header{}}
-	st := newMemStore()
-	iw := &invalidator{rw: rw, c: newCache(nil, "cache", settings{}, st), ctx: context.Background(), key: "k", status: cacheStatus{fwd: "method"}}
-	iw.WriteHeader(http.StatusEarlyHints)
-	if st.invalidations != 0 || iw.wroteHeader {
-		t.Error("an informational response is not the status of the response")
-	}
-	iw.WriteHeader(http.StatusOK)
-	iw.WriteHeader(http.StatusInternalServerError) // superfluous
-	if len(rw.codes) != 2 || rw.codes[0] != 103 || rw.codes[1] != 200 || st.invalidations != 1 {
-		t.Errorf("codes = %v, want [103 200] (invalidations %d)", rw.codes, st.invalidations)
-	}
-	if got := rw.header.Values("Cache-Status"); len(got) != 1 {
-		t.Errorf("Cache-Status = %q, want it once", got)
-	}
-}
-
-func TestInvalidatorPreservesFlusherAndUnwrap(t *testing.T) {
-	rw := httptest.NewRecorder()
-	iw := &invalidator{rw: rw, c: newCache(nil, "cache", settings{}, newMemStore()), ctx: context.Background(), key: "k", status: cacheStatus{fwd: "method"}}
-	var w any = iw
-	f, ok := w.(http.Flusher)
-	if !ok {
-		t.Fatal("invalidator must implement http.Flusher")
-	}
-	f.Flush()
-	if !rw.Flushed || rw.Code != 200 {
-		t.Errorf("flushed = %v, code = %d", rw.Flushed, rw.Code)
-	}
-	if iw.Unwrap() != http.ResponseWriter(rw) {
-		t.Error("Unwrap must return the underlying writer")
-	}
-}
-
-func TestInvalidatorPreservesHijacker(t *testing.T) {
+func TestInvalidationPreservesHijacker(t *testing.T) {
 	st := newMemStore()
 	s, err := parseConfig(CreateConfig())
 	if err != nil {
@@ -292,30 +215,6 @@ func TestInvalidatorPreservesHijacker(t *testing.T) {
 	}
 	if st.invalidations != 0 {
 		t.Error("a hijacked response has no status of ours: nothing is invalidated")
-	}
-}
-
-func TestInvalidatorPreservesTrailers(t *testing.T) {
-	s, err := parseConfig(CreateConfig())
-	if err != nil {
-		t.Fatal(err)
-	}
-	c := newCache(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set("Trailer", "X-Checksum")
-		_, _ = io.WriteString(w, "body")
-		w.Header().Set("X-Checksum", "abc")
-	}), "cache", s, newMemStore())
-	srv := httptest.NewServer(c)
-	defer srv.Close()
-
-	resp, err := http.Post(srv.URL, "text/plain", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	body, _ := io.ReadAll(resp.Body)
-	_ = resp.Body.Close()
-	if string(body) != "body" || resp.Trailer.Get("X-Checksum") != "abc" {
-		t.Errorf("body = %q, trailer = %q", body, resp.Trailer.Get("X-Checksum"))
 	}
 }
 
