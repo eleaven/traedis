@@ -10,3 +10,4 @@ services:
       - ./:/report # junit.xml
     environment:
       - HURL_VARIABLE_base_url=http://ingress
+      - HURL_VARIABLE_proxied_url=http://ingress:81 # trusts X-Forwarded-Proto (see example/traefik.yml)

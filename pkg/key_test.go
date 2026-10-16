@@ -12,12 +12,18 @@ func TestCacheURI(t *testing.T) {
 		target string
 		host   string
 		tls    bool
-		sort   bool // sortQuery
+		proto  string // X-Forwarded-Proto
+		sort   bool   // sortQuery
 		want   string
 	}{
 		{name: "host is lowercased", target: "/a", host: "Example.COM", want: "http://example.com/a"},
 		{name: "port is kept", target: "/a", host: "example.com:8080", want: "http://example.com:8080/a"},
 		{name: "https when TLS", target: "/a", host: "example.com", tls: true, want: "https://example.com/a"},
+		{name: "X-Forwarded-Proto: https over http", target: "/a", host: "example.com", proto: "https", want: "https://example.com/a"},
+		{name: "X-Forwarded-Proto: http over TLS", target: "/a", host: "example.com", tls: true, proto: "http", want: "http://example.com/a"},
+		{name: "X-Forwarded-Proto is case-insensitive", target: "/a", host: "example.com", proto: " HTTPS ", want: "https://example.com/a"},
+		{name: "X-Forwarded-Proto: the first of a list", target: "/a", host: "example.com", proto: "https, http", want: "https://example.com/a"},
+		{name: "X-Forwarded-Proto: another value is ignored", target: "/a", host: "example.com", tls: true, proto: "wss", want: "https://example.com/a"},
 		{name: "path case is kept", target: "/A/b", host: "example.com", want: "http://example.com/A/b"},
 		{name: "escaped path is kept", target: "/a%2Fb", host: "example.com", want: "http://example.com/a%2Fb"},
 		{name: "§4 query is kept as it is", target: "/?b=2&a=1&c=3", host: "example.com", want: "http://example.com/?b=2&a=1&c=3"},
@@ -38,6 +44,9 @@ func TestCacheURI(t *testing.T) {
 			r.TLS = nil
 			if tt.tls {
 				r.TLS = &tls.ConnectionState{}
+			}
+			if tt.proto != "" {
+				r.Header.Set("X-Forwarded-Proto", tt.proto)
 			}
 			if got := cacheURI(r, tt.sort); got != tt.want {
 				t.Errorf("cacheURI() = %q, want %q", got, tt.want)

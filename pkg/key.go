@@ -15,10 +15,23 @@ const keyPrefix = "traedis:"
 // responses. The method is not part of it. This format is stable: changing it
 // invalidates the cache.
 func cacheURI(r *http.Request, sortQuery bool) string {
-	// Schema
+	// Scheme: the one of X-Forwarded-Proto, which Traefik sets to the one of
+	// the connection, unless a proxy it trusts (forwardedHeaders) sent it:
+	// behind a proxy that terminates TLS, https requests reach Traefik over
+	// http too, and must not share their stored responses with http ones (a
+	// redirection to https would answer them, in a loop). A client cannot
+	// choose it: Traefik removes what an untrusted one sends. Without it (the
+	// handler is not behind Traefik), the one of the connection.
 	scheme := "http"
-	if r.TLS != nil {
+	proto, _, _ := strings.Cut(r.Header.Get("X-Forwarded-Proto"), ",")
+	switch strings.ToLower(strings.TrimSpace(proto)) {
+	case "https":
 		scheme = "https"
+	case "http":
+	default:
+		if r.TLS != nil {
+			scheme = "https"
+		}
 	}
 
 	// Host

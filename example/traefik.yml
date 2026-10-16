@@ -13,6 +13,12 @@ ping: {} # used by the container healthcheck
 entryPoints:
   web:
     address: ":80"
+  # As behind a proxy that terminates TLS: X-Forwarded-Proto is trusted, from anyone. Not published: only the
+  # end-to-end tests use it
+  proxied:
+    address: ":81"
+    forwardedHeaders:
+      insecure: true
 
 providers:
   file:

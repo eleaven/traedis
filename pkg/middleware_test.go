@@ -781,6 +781,38 @@ func TestRequestWithBodyBypassesCache(t *testing.T) {
 	}
 }
 
+// Behind a proxy that terminates TLS, the backend redirects the http requests
+// to https: that redirection must not answer the https requests, which reach
+// Traefik over http too and would follow it in a loop.
+func TestRedirectionToHTTPSIsNotServedToHTTPS(t *testing.T) {
+	c, _ := newTestCache(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-Forwarded-Proto") != "https" {
+			http.Redirect(w, r, "https://example.com/a", http.StatusMovedPermanently)
+			return
+		}
+		w.Header().Set("Cache-Control", "max-age=60")
+		_, _ = io.WriteString(w, "secure")
+	}), nil)
+	plain := http.Header{"X-Forwarded-Proto": {"http"}}
+	secure := http.Header{"X-Forwarded-Proto": {"https"}}
+
+	if rec := doRequest(c, http.MethodGet, "http://example.com/a", plain); rec.Code != http.StatusMovedPermanently {
+		t.Fatalf("http: got %d", rec.Code)
+	}
+	if rec := doRequest(c, http.MethodGet, "http://example.com/a", secure); rec.Code != 200 || rec.Body.String() != "secure" {
+		t.Errorf("https after http: got %d %q, Cache-Status = %q", rec.Code, rec.Body.String(), lastCacheStatus(rec))
+	}
+	// Each scheme has its own stored response.
+	for _, tt := range []struct {
+		hdr  http.Header
+		code int
+	}{{plain, http.StatusMovedPermanently}, {secure, 200}} {
+		if rec := doRequest(c, http.MethodGet, "http://example.com/a", tt.hdr); rec.Code != tt.code || !strings.HasPrefix(lastCacheStatus(rec), "traedis; hit") {
+			t.Errorf("%v: got %d, Cache-Status = %q", tt.hdr, rec.Code, lastCacheStatus(rec))
+		}
+	}
+}
+
 // A response to a GET reaches the client as it is written, not when the
 // handler returns, whether the cache keeps a copy of it or not: under Yaegi
 // v0.16.1 the backend cannot flush the writer the cache wraps.

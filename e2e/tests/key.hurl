@@ -63,6 +63,42 @@ HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss"
 
+# The scheme is the one of X-Forwarded-Proto, which a client cannot choose: Traefik replaces the one it sends
+GET {{base_url}}/whoami-cache?scheme={{run}}
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss"
+
+GET {{base_url}}/whoami-cache?scheme={{run}}
+X-Forwarded-Proto: https
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; hit"
+
+# Unless it comes from a proxy that Traefik trusts, which terminates TLS: https requests have their own stored responses
+GET {{proxied_url}}/whoami-cache?scheme={{run}}
+Host: ingress
+X-Forwarded-Proto: https
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss"
+
+GET {{proxied_url}}/whoami-cache?scheme={{run}}
+Host: ingress
+X-Forwarded-Proto: https
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; hit"
+
+GET {{proxied_url}}/whoami-cache?scheme={{run}}
+Host: ingress
+X-Forwarded-Proto: http
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; hit"
+# The response stored for the first request, over the other entry point
+body matches /X-Forwarded-Proto: http\s/
+
 # The key has the name of the middleware: two middlewares on the way to the same URL don't share what they store
 GET {{base_url}}/whoami-key?run={{run}}
 HTTP 200

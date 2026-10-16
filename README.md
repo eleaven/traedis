@@ -328,8 +328,11 @@ A shared cache gives the response made for one client to all the others. The def
   does the same: `/v1/users` and `/v2/users`, both stripped to `/users`, share their stored responses. Give such routers a cache middleware
   each, and rewrite the URL after it.
 - **What the response depends on must be in `Vary`.** When the backend reads a request header that its `Vary` does not name
-  (`X-Forwarded-Host`, `User-Agent`, `Accept-Language`…), one client chooses what the others get. The scheme is the one of the connection to
-  Traefik, `X-Forwarded-Proto` is not trusted: behind a proxy that terminates TLS, `http` and `https` requests share their stored responses.
+  (`X-Forwarded-Host`, `User-Agent`, `Accept-Language`…), one client chooses what the others get.
+- **Behind a proxy that terminates TLS, Traefik has to trust it.** The scheme of the key is the one of `X-Forwarded-Proto`, which Traefik
+  sets to the one of the connection, unless a proxy it trusts sent it: list that proxy in the `forwardedHeaders.trustedIPs` of the entry
+  point. Otherwise, `https` requests reach Traefik over `http` like the others and share their stored responses: a redirection of the
+  `http` requests to `https` then answers the `https` ones too, which follow it in a loop.
 - **Clients can always reach the backend.** A random query string is a miss, `Cache-Control: no-cache` skips the cache: put a `rateLimit`
   before it.
 - **Bodies are held in memory.** A response is copied in full to be stored, and a stored one is read in full from Redis to be sent: each
