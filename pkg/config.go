@@ -184,17 +184,12 @@ func parseConfig(cfg *Config) (settings, error) {
 		return s, err
 	}
 
-	for _, window := range []struct {
-		name  string
-		value time.Duration
-	}{
-		{"defaultStaleWhileRevalidate", s.defaultStaleWhileRevalidate},
-		{"defaultStaleIfError", s.defaultStaleIfError},
-	} {
-		// Nothing is kept past staleTtl: a longer window would never be honoured.
-		if window.value > s.staleTTL {
-			return s, fmt.Errorf("%s must not exceed staleTtl", window.name)
-		}
+	// Nothing is kept past staleTtl: a longer window would never be honoured.
+	if s.defaultStaleWhileRevalidate > s.staleTTL {
+		return s, errors.New("defaultStaleWhileRevalidate must not exceed staleTtl")
+	}
+	if s.defaultStaleIfError > s.staleTTL {
+		return s, errors.New("defaultStaleIfError must not exceed staleTtl")
 	}
 
 	if s.statusCodes, err = parseStatusCodes(cfg.StatusCodes); err != nil {
