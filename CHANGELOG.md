@@ -7,7 +7,7 @@ What each release changes for those who use the plugin, the latest first. The se
 
 ## v0.3.0
 
-The deprecated `Pragma` header field is no longer read.
+Remove deprecated header fields and fix security issues.
 
 ### ⚠️ Breaking changes
 
