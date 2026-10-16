@@ -37,7 +37,12 @@ jobs:
       - run: go vet ./...
       - run: go test -race ./...
       # Each fuzzer for a short while: their seeds already ran with the tests
-      - run: make fuzz FUZZTIME=10s
+      - name: Fuzz
+        run: |
+          for target in $(go test -list '^Fuzz' ./pkg | grep '^Fuzz'); do
+            echo "# $target"
+            go test -run '^$' -fuzz "^$target\$" -fuzztime 10s ./pkg
+          done
       # The interpreter Traefik v3.7 embeds: this is what runs in production.
       - run: go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1
       - run: yaegi test -v .
