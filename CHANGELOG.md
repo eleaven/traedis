@@ -18,6 +18,10 @@ The deprecated `Pragma` header field is no longer read.
 - **A `GET` with content could poison the cache.** Its content is not part of the cache key, but some backends read parameters in it: what they answered was stored and served to the other clients of the URL. A `GET` or `HEAD` with content (`Content-Length` or `Transfer-Encoding`) is now forwarded untouched, with `Cache-Status: traedis; fwd=bypass`: it is not answered from the cache, and its response is not stored.
 - **A client could remove a stored response** during its `stale-while-revalidate` window. The background refresh is the request that got the stale response, with its header fields: an invalid `Authorization` or cookie, or any header field the backend rejects, got an error from it, which removed the stored response. A `4xx` now keeps it, as a `5xx` or a `429` already did, but for a `404` or a `410`: the resource is gone.
 
+### Documentation
+
+- **[Security](https://github.com/eleaven/traedis/blob/v0.3.0/README.md#security): clients can remove stored responses.** As RFC 9111 requires, a `2xx` or a `3xx` answer to an unsafe method, even an unknown one, removes the stored responses of its URL: a backend that answers any method like a `GET`, or redirects an anonymous `POST` to its login page, lets anyone empty the cache. The README tells how to refuse the other methods.
+
 ## v0.2.1 – 2026-10-13
 
 No change to the plugin itself: this release is for its page in the [Traefik Plugin Catalog](https://plugins.traefik.io/plugins/6acde5da1c6f05d528c59972/traedis).

@@ -290,6 +290,7 @@ When the backend answers a request with an unsafe method (any method that is not
   does not invalidate `/cart`, and the `Location` and `Content-Location` of the response are not followed.
 - There is no guarantee: if Redis cannot be reached at that moment, the stored responses stay until they expire, and a `GET` that was
   already on its way to the backend can store its response after the invalidation.
+- Any client can trigger it, even without credentials when the backend answers it with a `2xx` or a `3xx`: see [Security](#security).
 
 ### Redis failures
 
@@ -322,6 +323,12 @@ A shared cache gives the response made for one client to all the others. The def
   Traefik, `X-Forwarded-Proto` is not trusted: behind a proxy that terminates TLS, `http` and `https` requests share their stored responses.
 - **Clients can always reach the backend.** A random query string is a miss, `Cache-Control: no-cache` skips the cache: put a `rateLimit`
   before it.
+- **Clients can remove stored responses.** As [RFC 9111][rfc9111-4.4] requires, a `2xx` or a `3xx` answer to an unsafe method, even one
+  the backend does not know (`FOO`), removes the stored responses of its URL for everyone. A backend that answers any method like a `GET`,
+  or that redirects an anonymous `POST` to its login page, lets any client empty the cache of any URL as often as it wants, and choose when
+  it is stored again (with what a header field that `Vary` does not name makes the backend answer). Have the backend refuse the methods it
+  does not handle with a `405`, or let only those reach it with the rule of the router, as for a site that is only read:
+  ``Host(`app.example.com`) && (Method(`GET`) || Method(`HEAD`))``.
 - **Cache pollution and cache flooding.** Each URL has its own entry, and the cache cannot know which query parameters the backend ignores:
   `?x=1`, `?x=2`… store the same response again and again, each one up to `maxBodyBytes` and for its freshness plus `staleTtl`. Nothing
   bounds the number of URLs: a client can fill Redis with entries that nobody asks for again (flooding), which then take the place of the
