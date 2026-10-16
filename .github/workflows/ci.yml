@@ -67,7 +67,7 @@ jobs:
 
   # Benchmarks of the pushed code: in-process under Yaegi, then k6 through Traefik (without and
   # with the cache). Informational only: shared runners are too noisy to gate on timings, so the
-  # release jobs don't need it.
+  # release job does not need it.
   bench:
     runs-on: ubuntu-latest
     steps:
