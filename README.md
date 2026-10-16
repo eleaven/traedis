@@ -92,8 +92,7 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 
 ## HTTP headers
 
-Traedis is driven by the standard HTTP header fields. This is what each of them does; [Caching rules](#caching-rules) has the
-fine print.
+Traedis is driven by the standard HTTP header fields sent by the backend, the client or added by Traedis itself.
 
 ### Sent by the backend
 
@@ -133,7 +132,7 @@ The request of the client says whether a stored response may answer it.
 - `If-None-Match`, `If-Modified-Since`: answered with a `304` when the stored response is the one the client
   [already has](#conditional-requests).
 - `Range`, `If-Range`: answered with the bytes asked for of the stored response ([range requests](#range-requests)).
-- `Authorization`: the response is only stored with `public`, `s-maxage` or `must-revalidate`.
+- `Authorization`: the response is not stored, unless the backend allows sharing it with `public`, `s-maxage` or `must-revalidate`.
 - `Cookie`: not part of the cache key, see [Security](#security).
 - `Accept-Encoding`, and the header fields that `Vary` names: choose the [variant](#variants).
 - `Upgrade`, `Accept: text/event-stream`: forwarded untouched (WebSockets, server-sent events).
@@ -162,7 +161,7 @@ Traedis adds these to the responses it sends to the client, and to the requests 
   - `fwd=method; detail=invalidated`: unsafe method, the stored responses of the URL were [removed](#invalidation-by-unsafe-methods)
     (`detail=redis`: Redis could not be reached).
   - `fwd-status=N`: the status the backend answered with, whatever the client gets.
-  - `key="…"`: the Redis key, with `exposeKey`.
+  - `key="…"`: the [Redis key](#cacheable-responses), enabled by the `exposeKey` option, to help debug the cache.
 
 ## Caching rules
 
