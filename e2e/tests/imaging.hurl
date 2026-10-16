@@ -69,3 +69,14 @@ GET {{base_url}}/imaging-cache-errors/unsafe/rs:fill:300:200/plain/http://placeh
 HTTP 403
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=403"
+
+# A URL whose signature is wrong is refused too: here that of 300x200, with other processing options (1200x800)
+GET {{base_url}}/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:1200:800/plain/http://placeholder:3000/600x400@avif?run={{run}}
+HTTP 403
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=403"
+
+GET {{base_url}}/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:1200:800/plain/http://placeholder:3000/600x400@avif?run={{run}}
+HTTP 403
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=403"
