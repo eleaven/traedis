@@ -189,8 +189,8 @@ URL: past that, a response is not stored, and the next one for its URL is.
 unsafe methods (`POST`, `PUT`, `DELETE`…), which [invalidate](#invalidation-by-unsafe-methods) what is stored.
 
 The Redis key is `traedis:<middleware>:<hash of the URL>`, with the name Traefik gives the middleware (`cache@file`). The routers that use
-the same middleware share its stored responses, in all the Traefik instances; two middlewares never do, even in the same Redis database
-and for the same URL: renaming a middleware starts it with an empty cache.
+the same middleware share its stored responses (see [Security](#security)), in all the Traefik instances; two middlewares never do, even in
+the same Redis database and for the same URL: renaming a middleware starts it with an empty cache.
 
 ### Variants
 
@@ -322,6 +322,11 @@ A shared cache gives the response made for one client to all the others. The def
   depend on the cookie (CSRF token, user name…).
 - **Middlewares listed after the cache don't run on a hit.** `basicAuth`, `forwardAuth`, `ipAllowList` and `rateLimit` go before it. The
   cache does not know who they let in: what it stores is shared by all of them.
+- **The key is the URL the cache sees, not the router.** The routers that use the same cache middleware share its stored responses: when
+  two of them answer the same URL with different backends, one kept for some clients (by `ClientIP`, a header, an entry point…) and the
+  other not, each one serves what the other stored. A middleware that rewrites the URL before the cache (`stripPrefix`, `replacePath`…)
+  does the same: `/v1/users` and `/v2/users`, both stripped to `/users`, share their stored responses. Give such routers a cache middleware
+  each, and rewrite the URL after it.
 - **What the response depends on must be in `Vary`.** When the backend reads a request header that its `Vary` does not name
   (`X-Forwarded-Host`, `User-Agent`, `Accept-Language`…), one client chooses what the others get. The scheme is the one of the connection to
   Traefik, `X-Forwarded-Proto` is not trusted: behind a proxy that terminates TLS, `http` and `https` requests share their stored responses.

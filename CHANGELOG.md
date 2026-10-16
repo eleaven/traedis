@@ -23,6 +23,7 @@ The deprecated `Pragma` header field is no longer read.
 ### Documentation
 
 - **[Security](https://github.com/eleaven/traedis/blob/v0.3.0/README.md#security): clients can remove stored responses.** As RFC 9111 requires, a `2xx` or a `3xx` answer to an unsafe method, even an unknown one, removes the stored responses of its URL: a backend that answers any method like a `GET`, or redirects an anonymous `POST` to its login page, lets anyone empty the cache. The README tells how to refuse the other methods.
+- **[Security](https://github.com/eleaven/traedis/blob/v0.3.0/README.md#security): the key is the URL the cache sees, not the router.** Routers that use the same cache middleware share its stored responses, even when they reach different backends for different clients; so do URLs that a middleware before the cache rewrites to the same one (`stripPrefix`…).
 
 ## v0.2.1 – 2026-10-13
 
