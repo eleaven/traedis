@@ -18,11 +18,7 @@ const staleURL = "http://example.com/a"
 // storeAged stores a response to staleURL received age ago.
 func storeAged(t *testing.T, st *memStore, cacheControl string, age time.Duration) {
 	t.Helper()
-	at := time.Now().Add(-age)
-	storeEntry(t, st, staleURL, &entry{
-		status: 200, header: http.Header{"Cache-Control": {cacheControl}, "Content-Type": {"text/plain"}}, body: []byte("old"),
-		requestTime: at, responseTime: at,
-	})
+	storeReceived(t, st, staleURL, http.Header{"Cache-Control": {cacheControl}, "Content-Type": {"text/plain"}}, time.Now().Add(-age))
 }
 
 // waitRevalidations waits for the background revalidations of c to end.

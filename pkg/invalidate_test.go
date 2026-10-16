@@ -26,14 +26,10 @@ func TestSafeMethod(t *testing.T) {
 
 const invalidatedURL = "http://example.com/items/1?b=2&a=1"
 
-// storeFresh stores a fresh response at uri, and two variants at variedURL.
+// storeFresh stores a fresh response at uri.
 func storeFresh(t *testing.T, st *memStore, uri string) {
 	t.Helper()
-	now := time.Now()
-	storeEntry(t, st, uri, &entry{
-		status: 200, header: http.Header{"Cache-Control": {"max-age=60"}}, body: []byte("cached"),
-		requestTime: now, responseTime: now,
-	})
+	storeReceived(t, st, uri, http.Header{"Cache-Control": {"max-age=60"}}, time.Now())
 }
 
 func TestInvalidation(t *testing.T) {

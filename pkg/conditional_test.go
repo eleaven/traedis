@@ -486,18 +486,13 @@ func TestClientConditionsWhenBypassed(t *testing.T) {
 func storeValidated(t *testing.T, st *memStore, cacheControl string, age time.Duration) {
 	t.Helper()
 	at := time.Now().Add(-age)
-	storeEntry(t, st, staleURL, &entry{
-		status: 200,
-		header: http.Header{
-			"Cache-Control": {cacheControl}, "Content-Type": {"text/plain"}, "Etag": {`"v1"`}, "Last-Modified": {lastModified},
-			"Date": {at.UTC().Format(http.TimeFormat)}, "X-Kept": {"stored"},
-		},
-		body:        []byte("old"),
-		requestTime: at, responseTime: at,
-	})
+	storeReceived(t, st, staleURL, http.Header{
+		"Cache-Control": {cacheControl}, "Content-Type": {"text/plain"}, "Etag": {`"v1"`}, "Last-Modified": {lastModified},
+		"Date": {at.UTC().Format(http.TimeFormat)}, "X-Kept": {"stored"},
+	}, at)
 }
 
-func storedAt(t *testing.T, c *cache, st *memStore, uri, field string) *entry {
+func storedAt(t *testing.T, st *memStore, uri, field string) *entry {
 	t.Helper()
 	if _, ok := st.lookup(cacheKey(uri), field); !ok {
 		return nil
@@ -552,7 +547,7 @@ func TestValidation(t *testing.T) {
 		t.Errorf("Cache-Status = %q, want %q120", status, validated)
 	}
 
-	e := storedAt(t, c, st, staleURL, "")
+	e := storedAt(t, st, staleURL, "")
 	if e == nil || st.sets != 2 || st.dels != 0 {
 		t.Fatalf("the entry must be stored again (sets %d, dels %d)", st.sets, st.dels)
 	}
@@ -686,7 +681,7 @@ func TestValidationOutcome(t *testing.T) {
 				t.Errorf("If-None-Match sent = %q, want %q", got, tt.wantSent)
 			}
 			body := ""
-			if e := storedAt(t, c, st, staleURL, ""); e != nil {
+			if e := storedAt(t, st, staleURL, ""); e != nil {
 				body = string(e.body)
 			}
 			if body != tt.wantStored || st.sets != tt.wantSets {
@@ -757,7 +752,7 @@ func TestValidationWithSetCookie(t *testing.T) {
 			if got := rec.Header().Values("Set-Cookie"); !reflect.DeepEqual(got, []string{"before=1", "sid=1", "theme=dark"}) {
 				t.Errorf("Set-Cookie = %q", got)
 			}
-			e := storedAt(t, c, st, staleURL, "")
+			e := storedAt(t, st, staleURL, "")
 			if (e != nil) != tt.wantStored {
 				t.Fatalf("stored = %v, want %v", e != nil, tt.wantStored)
 			}
@@ -803,14 +798,14 @@ func TestValidationOfVariant(t *testing.T) {
 	if rec.Body.String() != "old fr" || !strings.HasPrefix(lastCacheStatus(rec), validated) || o.lastReq.Header.Get("If-None-Match") != `"v1"` {
 		t.Fatalf("got %q %q", rec.Body.String(), lastCacheStatus(rec))
 	}
-	fr := storedAt(t, c, st, staleURL, fields["fr"])
+	fr := storedAt(t, st, staleURL, fields["fr"])
 	if fr == nil || time.Since(fr.responseTime) > time.Minute || string(fr.body) != "old fr" {
 		t.Fatalf("the variant must be refreshed in its field: %+v", fr)
 	}
 	if !reflect.DeepEqual(fr.vary, http.Header{"Accept-Language": {"fr"}, "Accept-Encoding": {"br,gzip"}}) {
 		t.Errorf("the variant must keep what it was selected by: %v", fr.vary)
 	}
-	if en := storedAt(t, c, st, staleURL, fields["en"]); en == nil || time.Since(en.responseTime) < time.Minute {
+	if en := storedAt(t, st, staleURL, fields["en"]); en == nil || time.Since(en.responseTime) < time.Minute {
 		t.Error("the other variant must be left as it was")
 	}
 	if m := func() marker { v, _ := st.lookup(key, ""); mk, _ := decodeMarker(v.value); return mk }(); !sameStrings(m.names, names) || !sameStrings(m.codings, []string{"zstd", identity}) {
@@ -858,7 +853,7 @@ func TestBackgroundValidation(t *testing.T) {
 			if o.calls != 1 || o.lastReq.Header.Get("If-None-Match") != `"v1"` || o.lastReq.Header.Get("If-Modified-Since") != lastModified {
 				t.Fatalf("§4.3.1 the revalidation must send the validators of the entry (calls %d): %v", o.calls, o.lastReq.Header)
 			}
-			e := storedAt(t, c, st, staleURL, "")
+			e := storedAt(t, st, staleURL, "")
 			body := ""
 			if e != nil {
 				body = string(e.body)
@@ -918,7 +913,7 @@ func TestHeadFreshensStoredResponse(t *testing.T) {
 			if rec.Body.Len() != 0 || !strings.Contains(lastCacheStatus(rec), "; fwd-status=") {
 				t.Errorf("got %q %q", rec.Body.String(), lastCacheStatus(rec))
 			}
-			e := storedAt(t, c, st, staleURL, "")
+			e := storedAt(t, st, staleURL, "")
 			if (e != nil) != tt.wantStored || st.sets != tt.wantSets || st.dels != tt.wantDels {
 				t.Fatalf("stored = %v, sets = %d, dels = %d; want %v, %d, %d", e != nil, st.sets, st.dels, tt.wantStored, tt.wantSets, tt.wantDels)
 			}

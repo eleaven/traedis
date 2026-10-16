@@ -153,6 +153,13 @@ func storeEntry(t *testing.T, st *memStore, uri string, e *entry) {
 	}
 }
 
+// storeReceived stores at uri a 200 response with header and the body "old",
+// received at the given time.
+func storeReceived(t *testing.T, st *memStore, uri string, header http.Header, at time.Time) {
+	t.Helper()
+	storeEntry(t, st, uri, &entry{status: 200, header: header, body: []byte("old"), requestTime: at, responseTime: at})
+}
+
 // §4: URIs that differ by the order of their query parameters are not the same,
 // unless sortQuery says so.
 func TestSortQuery(t *testing.T) {
