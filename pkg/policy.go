@@ -312,8 +312,8 @@ func storeTTL(req *http.Request, reqCC cacheControl, e *entry, cc cacheControl, 
 	if req.Method != http.MethodGet || reqCC.noStore {
 		return 0, false
 	}
-	if !slices.Contains(cfg.statusCodes, status) || status < 200 || status == http.StatusPartialContent ||
-		status == http.StatusNotModified || h.Get("Content-Range") != "" {
+	// statusCodes has none of the codes that are never stored (see storableStatus).
+	if !slices.Contains(cfg.statusCodes, status) || h.Get("Content-Range") != "" {
 		return 0, false
 	}
 
