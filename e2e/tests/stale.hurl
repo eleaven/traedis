@@ -83,6 +83,28 @@ HTTP 200
 [Asserts]
 header "Cache-Status" matches /^traedis; hit; ttl=-\d+; detail=stale-while-revalidate$/
 
+# Nor does a client error (401): the backend may be rejecting the request that triggered the revalidation (its
+# Authorization, its cookies…), which another client would not see
+
+POST {{base_url}}/whoami-stale/health
+```
+401
+```
+HTTP 200
+
+GET {{base_url}}/whoami-stale/health?sie={{run}}
+Authorization: Bearer invalid
+HTTP 200
+[Asserts]
+header "Cache-Status" matches /^traedis; hit; ttl=-\d+; detail=stale-while-revalidate$/
+
+GET {{base_url}}/whoami-stale/health?sie={{run}}
+[Options]
+delay: 500ms
+HTTP 200
+[Asserts]
+header "Cache-Status" matches /^traedis; hit; ttl=-\d+; detail=stale-while-revalidate$/
+
 # A background revalidation answered by a response that cannot be stored (404 is not in statusCodes) deletes it
 
 POST {{base_url}}/whoami-stale/health

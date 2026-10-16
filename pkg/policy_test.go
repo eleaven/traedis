@@ -415,6 +415,11 @@ func TestSupersedes(t *testing.T) {
 		want   bool
 	}{
 		{name: "status not in statusCodes", status: 404, header: http.Header{"Cache-Control": {"max-age=60"}}, want: true},
+		{name: "resource gone", status: 410, header: http.Header{}, want: true},
+		{name: "request rejected: credentials", status: 401, header: http.Header{}},
+		{name: "request rejected: forbidden", status: 403, header: http.Header{"Cache-Control": {"no-store"}}},
+		{name: "request rejected: malformed", status: 400, header: http.Header{}},
+		{name: "request rejected: header fields too large", status: 431, header: http.Header{}},
 		{name: "§5.2.2.5 no-store", status: 200, header: http.Header{"Cache-Control": {"no-store"}}, want: true},
 		{name: "§5.2.2.7 private", status: 200, header: http.Header{"Cache-Control": {"private, max-age=60"}}, want: true},
 		{name: "already stale on arrival", status: 200, header: http.Header{"Cache-Control": {"max-age=60"}, "Age": {"60"}}, want: true},

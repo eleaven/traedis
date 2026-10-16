@@ -16,6 +16,7 @@ The deprecated `Pragma` header field is no longer read.
 ### Security
 
 - **A `GET` with content could poison the cache.** Its content is not part of the cache key, but some backends read parameters in it: what they answered was stored and served to the other clients of the URL. A `GET` or `HEAD` with content (`Content-Length` or `Transfer-Encoding`) is now forwarded untouched, with `Cache-Status: traedis; fwd=bypass`: it is not answered from the cache, and its response is not stored.
+- **A client could remove a stored response** during its `stale-while-revalidate` window. The background refresh is the request that got the stale response, with its header fields: an invalid `Authorization` or cookie, or any header field the backend rejects, got an error from it, which removed the stored response. A `4xx` now keeps it, as a `5xx` or a `429` already did, but for a `404` or a `410`: the resource is gone.
 
 ## v0.2.1 – 2026-10-13
 

@@ -452,14 +452,16 @@ func staleIfErrorStatus(status int) bool {
 }
 
 // supersedes reports whether e, a response to a background revalidation that
-// is not stored, replaces the stored one anyway, which must then be deleted. It
-// does not when the backend is failing or throttling (5xx, 429), nor when the
-// response is only refused because of the Authorization or Cookie of the
-// request that triggered the revalidation: a request without them would get it
-// stored, and clients must not be able to evict entries. cc is the
-// Cache-Control of e.
+// is not stored, replaces the stored one anyway, which must then be deleted.
+// Clients must not be able to evict entries, and the request that triggered
+// the revalidation is forwarded as it is. So an error does not: the backend
+// is failing or throttling (5xx, 429), or rejects that request (its
+// Authorization, its cookies, its header fields…), but for a 404 or a 410,
+// which say the resource is gone. Neither does a response only refused
+// because of the Authorization or Cookie of that request: a request without
+// them would get it stored. cc is the Cache-Control of e.
 func supersedes(e *entry, cc cacheControl, cfg settings) bool {
-	if e.status >= 500 || e.status == http.StatusTooManyRequests {
+	if e.status >= 400 && e.status != http.StatusNotFound && e.status != http.StatusGone {
 		return false
 	}
 	anonymous := &http.Request{Method: http.MethodGet, Header: http.Header{}}

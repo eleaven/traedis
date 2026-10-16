@@ -261,7 +261,9 @@ A stored response that is no longer fresh is served only when allowed, for at mo
 
 - **`stale-while-revalidate`** ([RFC 5861][rfc5861]): it is served at once and refreshed in the background, with at most one refresh per
   URL and `maxRevalidations` at a time: past it, the refresh is left to a later request. Not for a request with `max-age` or `min-fresh`
-  (a browser reload), which waits for the backend.
+  (a browser reload), which waits for the backend. The refresh is the request that got the stale response, with its header fields: a
+  response that may not be stored removes the stored one, but for an error, which keeps it (`5xx`, `429`, or a `4xx` that may only be
+  about that request: its `Authorization`, its cookies…). A `404` or a `410` still removes it: the resource is gone.
 - **`stale-if-error`**: it replaces a `500`, `502`, `503` or `504`, including those of Traefik when the backend is unreachable. A request
   with `max-age` or `min-fresh` gets it too, one with `no-cache` does not.
 - **`max-stale`** on the request ([RFC 9111 §5.2.1.2](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1.2)): it is served as it is,
