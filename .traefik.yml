@@ -24,6 +24,7 @@ testData:
   defaultStaleWhileRevalidate: 0s
   defaultStaleIfError: 0s
   maxBodyBytes: 5242880
+  maxBufferedBytes: 67108864
   maxVariants: 16
   maxRevalidations: 10
   revalidationTimeout: 30s

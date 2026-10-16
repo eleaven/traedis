@@ -31,11 +31,14 @@ type cache struct {
 
 	writeMu sync.Mutex
 	writing map[string]*pendingWrite // keys being written to (see later), at most redis.poolSize
+
+	bodies *budget // the bodies held in memory, at most maxBufferedBytes
 }
 
 // pendingWrite is a write to a key that is running.
 type pendingWrite struct {
 	done chan struct{} // closed once it has run
+	held int64         // what the body it writes holds of the memory budget
 	// invalidated is set, under writeMu, when an unsafe request invalidated
 	// the key in the meantime: what is written must not stay.
 	invalidated bool
@@ -57,6 +60,7 @@ func newCache(next http.Handler, name string, cfg settings, s store) *cache {
 		next: next, name: name, cfg: cfg, store: s, markers: &markers{},
 		revalidating: map[string]bool{},
 		writing:      map[string]*pendingWrite{},
+		bodies:       &budget{max: cfg.maxBufferedBytes},
 	}
 }
 
@@ -124,20 +128,38 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			usable = detail != ""
 		}
+		// Small bodies are not counted: no call for them (see budget).
+		if usable && stored.size > smallBody && !holdBody(c.bodies, r, stored) {
+			// The bodies held in memory leave no room for this one: it is not
+			// sent from the cache (see budget).
+			status.fwd = "bypass"
+			status.detail = "memory"
+			c.forward(w, r, key, "", reqCC, status, false, nil)
+			return
+		}
 		// Read with its body, the entry is ready.
-		if usable && (withBody || c.ready(r, key, field, stored)) {
+		if usable && (stored.body != nil || c.ready(r, key, field, stored)) {
 			if detail == "stale-while-revalidate" {
 				c.revalidate(r, key, field, stored)
 			}
 			status.hit = true
 			status.detail = detail
 			c.serve(w, r, stored, age, lifetime, status)
+			if stored.held > 0 {
+				letGo(c.bodies, stored)
+			}
 			return
 		}
 		if usable {
 			// The store no longer has its body: nothing stored can answer.
 			stored = nil
 		} else {
+			if stored.body != nil && stored.size > smallBody && !holdBody(c.bodies, r, stored) {
+				// Read along with its entry, the body would wait for the
+				// backend outside of the budget: it is read again if needed
+				// (see ready).
+				stored.body = nil
+			}
 			// RFC 9211 §2.2: the response is stale, or fresh but not what the
 			// request asks for (max-age, min-fresh).
 			status.fwd = "stale"
@@ -147,6 +169,9 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	c.forward(w, r, key, field, reqCC, status, true, stored)
+	if stored != nil && stored.held > 0 {
+		letGo(c.bodies, stored)
+	}
 }
 
 // find returns the stored response of key selected by the request header h
@@ -232,13 +257,21 @@ func (c *cache) find(ctx context.Context, key string, h http.Header, withBody bo
 // ready reports whether e, the entry of field, can answer r: its body is read
 // from the store now, when find left it there and the answer has one. It is
 // not when the store no longer has the entry as it was read: the body there
-// may be the one of another response.
+// may be the one of another response. Nor is it when the memory budget has no
+// room for the body (see holdBody): whoever got e lets it go once served.
 func (c *cache) ready(r *http.Request, key, field string, e *entry) bool {
-	if e.body != nil || e.size == 0 || !sendsBody(r, e) {
+	if e.size == 0 || !sendsBody(r, e) {
+		return true
+	}
+	if !holdBody(c.bodies, r, e) {
+		return false
+	}
+	if e.body != nil {
 		return true
 	}
 	values, err := c.store.get(r.Context(), key, []string{field, bodyField(field)})
 	if err != nil || !bytes.Equal(values[0], e.raw) || int64(len(values[1])) != e.size {
+		letGo(c.bodies, e)
 		return false
 	}
 	e.body = values[1]
@@ -348,6 +381,7 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 	out, validating := backendRequest(r, stored)
 	m.validating = validating
 	rec := newRecorder(w, m, c.cfg.maxBodyBytes)
+	rec.bodies = c.bodies
 	c.next.ServeHTTP(rec, out)
 	if !rec.wroteHeader {
 		rec.WriteHeader(http.StatusOK)
@@ -375,9 +409,12 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 		status.fwdStatus = rec.status
 		status.served = true
 		c.serve(w, r, e, currentAge(e, time.Now()), freshnessLifetime(e, c.cfg.defaultTTL), status)
+		if e.held > 0 {
+			letGo(c.bodies, e)
+		}
 		if m.updated {
 			req := r.Clone(context.Background())
-			c.later(key, func(ctx context.Context) { c.freshen(ctx, req, reqCC, key, field, e) })
+			c.later(key, 0, func(ctx context.Context) { c.freshen(ctx, req, reqCC, key, field, e) })
 		}
 		return
 	}
@@ -390,11 +427,17 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 	}
 	if m.headHeader != nil {
 		req := r.Clone(context.Background())
-		c.later(key, func(ctx context.Context) { c.freshenWithHead(ctx, req, reqCC, key, field, stored, m) })
+		c.later(key, 0, func(ctx context.Context) { c.freshenWithHead(ctx, req, reqCC, key, field, stored, m) })
 		return
 	}
 	if fields, ok := c.toStore(rec, m); ok {
-		c.later(key, func(ctx context.Context) { c.put(ctx, key, m.variant, fields, m.ttl) })
+		// The write holds the copy now.
+		held := rec.held
+		rec.held = 0
+		c.later(key, held, func(ctx context.Context) { c.put(ctx, key, m.variant, fields, m.ttl) })
+	}
+	if rec.held > 0 {
+		rec.release()
 	}
 }
 
@@ -407,17 +450,22 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 // that a response is stored before the next one is looked for. Writes are
 // bounded: one per key, and no more than Redis has connections. Past that,
 // write is not run: a later response is stored instead.
-func (c *cache) later(key string, write func(ctx context.Context)) {
-	p := &pendingWrite{done: make(chan struct{})}
+//
+// held is what the body that write stores holds of the memory budget: given
+// back once it has run, or at once when it does not.
+func (c *cache) later(key string, held int64, write func(ctx context.Context)) {
+	p := &pendingWrite{done: make(chan struct{}), held: held}
 	c.writeMu.Lock()
 	busy := c.writing[key] != nil || len(c.writing) >= c.cfg.redis.poolSize
 	if !busy {
 		c.writing[key] = p
 	}
 	c.writeMu.Unlock()
-	if !busy {
-		go c.write(key, p, write)
+	if busy {
+		giveBytes(c.bodies, held)
+		return
 	}
+	go c.write(key, p, write)
 }
 
 func (c *cache) write(key string, p *pendingWrite, write func(ctx context.Context)) {
@@ -431,6 +479,7 @@ func (c *cache) written(key string, p *pendingWrite) {
 	if r := recover(); r != nil {
 		logf(os.Stderr, c.name, "panic while storing a response: %v", r)
 	}
+	giveBytes(c.bodies, p.held)
 	c.writeMu.Lock()
 	delete(c.writing, key)
 	invalidated := p.invalidated
@@ -656,6 +705,10 @@ func (m *missHook) beforeHeader(code int, h http.Header) disposition {
 			e := m.stored
 			if update {
 				e = refreshed(m.stored, h, m.requestTime, m.responseTime)
+				// It has the body of the stored response, and what that holds
+				// of the memory budget: forward lets it go.
+				e.held = m.stored.held
+				m.stored.held = 0
 			}
 			// In the background, nobody is answered: the body is not needed.
 			if m.revalidation || m.c.ready(m.req, m.key, m.field, e) {
@@ -665,8 +718,8 @@ func (m *missHook) beforeHeader(code int, h http.Header) disposition {
 				return withhold
 			}
 		}
-		// Not the stored response, or its body is gone: in the background, it
-		// is deleted.
+		// Not the stored response, or its body is gone (or has no room in
+		// memory): in the background, it is deleted.
 		m.unusable = true
 		m.superseded = m.revalidation
 		return withhold

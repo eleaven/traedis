@@ -29,7 +29,7 @@ func TestCreateConfigDefaults(t *testing.T) {
 	if s.maxRevalidations != 10 || s.revalidationTimeout != 30*time.Second {
 		t.Errorf("maxRevalidations = %d, revalidationTimeout = %v", s.maxRevalidations, s.revalidationTimeout)
 	}
-	if s.maxBodyBytes != 5242880 || s.maxVariants != 16 || s.sortQuery || s.exposeKey {
+	if s.maxBodyBytes != 5242880 || s.maxBufferedBytes != 64<<20 || s.maxVariants != 16 || s.sortQuery || s.exposeKey {
 		t.Errorf("settings = %+v", s)
 	}
 }
@@ -93,6 +93,17 @@ func TestParseConfig(t *testing.T) {
 		{name: "§3.2 not modified", mutate: func(c *Config) { c.StatusCodes = []int{304} }, wantErr: "a 304 response is never stored"},
 		{name: "zero maxBodyBytes", mutate: func(c *Config) { c.MaxBodyBytes = 0 }, wantErr: "maxBodyBytes"},
 		{name: "maxBodyBytes past what Redis takes", mutate: func(c *Config) { c.MaxBodyBytes = 512<<20 + 1 }, wantErr: "maxBodyBytes must not exceed"},
+		{name: "zero maxBufferedBytes", mutate: func(c *Config) { c.MaxBufferedBytes = 0 }, wantErr: "maxBufferedBytes must not be under maxBodyBytes"},
+		{name: "maxBufferedBytes under maxBodyBytes", mutate: func(c *Config) { c.MaxBodyBytes = 100 << 20 }, wantErr: "maxBufferedBytes must not be under maxBodyBytes"},
+		{
+			name:   "maxBufferedBytes as large as maxBodyBytes",
+			mutate: func(c *Config) { c.MaxBodyBytes = 100 << 20; c.MaxBufferedBytes = 100 << 20 },
+			check: func(t *testing.T, s settings) {
+				if s.maxBufferedBytes != 100<<20 {
+					t.Errorf("maxBufferedBytes = %d", s.maxBufferedBytes)
+				}
+			},
+		},
 		{name: "negative maxVariants", mutate: func(c *Config) { c.MaxVariants = -1 }, wantErr: "maxVariants"},
 		{
 			name:   "maxVariants 0 disables variants",
@@ -222,6 +233,7 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.DefaultStaleWhileRevalidate = "0s"
 	cfg.DefaultStaleIfError = "0s"
 	cfg.MaxBodyBytes = 5242880
+	cfg.MaxBufferedBytes = 67108864
 	cfg.MaxVariants = 16
 	cfg.MaxRevalidations = 10
 	cfg.RevalidationTimeout = "30s"

@@ -37,7 +37,12 @@ func (c *cache) revalidate(r *http.Request, key, field string, e *entry) {
 	for _, name := range clientOnly {
 		req.Header.Del(name)
 	}
-	go c.refresh(req, key, field, e)
+	// Its body stays with the request that is served: the background has no
+	// use of it, and must not keep it in memory outside of the budget.
+	bare := *e
+	bare.body = nil
+	bare.held = 0
+	go c.refresh(req, key, field, &bare)
 }
 
 // refresh runs a background revalidation: a GET with the validators of the
@@ -57,6 +62,8 @@ func (c *cache) refresh(req *http.Request, key, field string, e *entry) {
 	out, validating := backendRequest(req, e)
 	m.validating = validating
 	rec := newRecorder(&nullWriter{header: http.Header{}}, m, c.cfg.maxBodyBytes)
+	rec.bodies = c.bodies
+	defer rec.release()
 	c.next.ServeHTTP(rec, out)
 	if !rec.wroteHeader {
 		rec.WriteHeader(http.StatusOK)

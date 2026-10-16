@@ -29,6 +29,7 @@ type Config struct {
 	DefaultStaleWhileRevalidate string      `json:"defaultStaleWhileRevalidate,omitempty"`
 	DefaultStaleIfError         string      `json:"defaultStaleIfError,omitempty"`
 	MaxBodyBytes                int64       `json:"maxBodyBytes,omitempty"`
+	MaxBufferedBytes            int64       `json:"maxBufferedBytes,omitempty"`
 	MaxVariants                 int         `json:"maxVariants,omitempty"`
 	MaxRevalidations            int         `json:"maxRevalidations,omitempty"`
 	RevalidationTimeout         string      `json:"revalidationTimeout,omitempty"`
@@ -73,6 +74,7 @@ func CreateConfig() *Config {
 		DefaultStaleWhileRevalidate: "0s",
 		DefaultStaleIfError:         "0s",
 		MaxBodyBytes:                5 << 20,
+		MaxBufferedBytes:            64 << 20,
 		MaxVariants:                 16,
 		MaxRevalidations:            10,
 		RevalidationTimeout:         "30s",
@@ -90,6 +92,8 @@ type settings struct {
 	defaultStaleWhileRevalidate time.Duration
 	defaultStaleIfError         time.Duration
 	maxBodyBytes                int64
+	// maxBufferedBytes bounds the bodies held in memory at once (see budget).
+	maxBufferedBytes int64
 	// maxVariants is the number of variants a URI key may hold, on top of its
 	// marker. Past it, new variants are not stored: stored ones are never
 	// evicted. 0: responses with Vary are not stored.
@@ -214,6 +218,12 @@ func parseConfig(cfg *Config) (settings, error) {
 		return s, fmt.Errorf("maxBodyBytes must not exceed %d, the largest value Redis takes", maxValueBytes)
 	}
 	s.maxBodyBytes = cfg.MaxBodyBytes
+
+	// Any response that may be stored has to fit.
+	if cfg.MaxBufferedBytes < cfg.MaxBodyBytes {
+		return s, errors.New("maxBufferedBytes must not be under maxBodyBytes")
+	}
+	s.maxBufferedBytes = cfg.MaxBufferedBytes
 
 	if cfg.MaxVariants < 0 {
 		return s, errors.New("maxVariants must not be negative")

@@ -84,6 +84,7 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `defaultStaleWhileRevalidate`  | `0s`                   | `stale-while-revalidate` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                              |
 | `defaultStaleIfError`          | `0s`                   | `stale-if-error` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                                      |
 | `maxBodyBytes`                 | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached. At most 512 MiB, the largest value Redis takes.                                    |
+| `maxBufferedBytes`             | `67108864` (64 MiB)    | [Bodies held in memory](#security) at once, in each Traefik instance: past it, the cache is bypassed. At least `maxBodyBytes`.                 |
 | `maxVariants`                  | `16`                   | Stored [variants](#variants) per URL. `0`: responses with `Vary` are not cached.                                                               |
 | `maxRevalidations`             | `10`                   | [Background refreshes](#stale-responses) running at once, for each middleware in each Traefik instance.                                        |
 | `revalidationTimeout`          | `30s`                  | Maximum time of a background refresh.                                                                                                          |
@@ -159,6 +160,8 @@ Traedis adds these to the responses it sends to the client, and to the requests 
   - `fwd=stale; fwd-status=503; ttl=-N; detail=stale-if-error`: the backend failed, the stored response is served in place of its error.
   - `fwd=bypass`: forwarded untouched, WebSocket upgrade, server-sent events or request with content.
   - `fwd=bypass; detail=redis`: forwarded, Redis [failed, timed out or is no longer asked](#redis-failures).
+  - `fwd=bypass; detail=memory`: forwarded, the bodies held in memory reach `maxBufferedBytes`: the stored response is not sent from the
+    cache (see [Security](#security)).
   - `fwd=method`: forwarded, `OPTIONS`, `TRACE` or an unsafe method.
   - `fwd=method; detail=invalidated`: unsafe method, the stored responses of the URL were [removed](#invalidation-by-unsafe-methods)
     (`detail=redis`: Redis could not be reached).
@@ -175,7 +178,8 @@ Responses are stored by middleware and by URL (scheme, host, path and query), an
 - its status is listed in `statusCodes`;
 - it is fresh, through `s-maxage`, `max-age`, `Expires` or `defaultTtl`;
 - no [header field](#http-headers) of the request or of the response forbids it;
-- it is complete (a response that the backend cuts short is not stored) and fits in `maxBodyBytes`.
+- it is complete (a response that the backend cuts short is not stored) and fits in `maxBodyBytes`, and in `maxBufferedBytes` along with
+  the other bodies held in memory (see [Security](#security)).
 
 A response is stored once it is sent: its client never waits for Redis. The next request for the same URL does, for no longer than
 `redis.dialTimeout`, so that a miss is followed by a hit. No more responses are being stored at a time than `redis.poolSize`, and one per
@@ -323,6 +327,11 @@ A shared cache gives the response made for one client to all the others. The def
   Traefik, `X-Forwarded-Proto` is not trusted: behind a proxy that terminates TLS, `http` and `https` requests share their stored responses.
 - **Clients can always reach the backend.** A random query string is a miss, `Cache-Control: no-cache` skips the cache: put a `rateLimit`
   before it.
+- **Bodies are held in memory.** A response is copied in full to be stored, and a stored one is read in full from Redis to be sent: each
+  one stays in the memory of Traefik until its client got it all, which a slow client makes last. Past `maxBufferedBytes` for all of them
+  (bodies up to 32 KiB are not counted, no more than what Traefik buffers anyway), a response is sent without being stored, and a stored
+  one is not sent from the cache (`fwd=bypass; detail=memory`): the backend gets the requests. Put an `inFlightReq` before the cache:
+  `rateLimit` bounds how often a client sends requests, not how many of them it keeps waiting at once.
 - **Clients can remove stored responses.** As [RFC 9111][rfc9111-4.4] requires, a `2xx` or a `3xx` answer to an unsafe method, even one
   the backend does not know (`FOO`), removes the stored responses of its URL for everyone. A backend that answers any method like a `GET`,
   or that redirects an anonymous `POST` to its login page, lets any client empty the cache of any URL as often as it wants, and choose when
@@ -344,8 +353,9 @@ http:
   routers:
     my-app:
       middlewares:
-        - auth      # before the cache: a hit is served without running what comes after it
-        - ratelimit # before the cache: random URLs are misses that reach the backend
+        - auth        # before the cache: a hit is served without running what comes after it
+        - ratelimit   # before the cache: random URLs are misses that reach the backend
+        - inflightreq # before the cache: each request may hold a body in memory
         - cache
 ```
 

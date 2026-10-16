@@ -51,6 +51,8 @@ type entry struct {
 	// raw is the entry as it was read from the store, if it was: what tells
 	// whether a body read later is still its own (see ready).
 	raw []byte
+	// held is what its body holds of the memory budget (see holdBody).
+	held int64
 }
 
 // bodyField returns the field holding the body of the entry of field.
