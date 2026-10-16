@@ -46,3 +46,14 @@ GET {{base_url}}/imaging-cache/unsafe/rs:fill:300:200/plain/http://placeholder:3
 HTTP 404
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=404"
+
+# statusCodes with a range (200 and 400-499): the same error is stored, and served from the cache
+GET {{base_url}}/imaging-cache-errors/unsafe/rs:fill:300:200/plain/http://placeholder:3000/missing@avif?run={{run}}
+HTTP 404
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=404"
+
+GET {{base_url}}/imaging-cache-errors/unsafe/rs:fill:300:200/plain/http://placeholder:3000/missing@avif?run={{run}}
+HTTP 404
+[Asserts]
+header "Cache-Status" contains "traedis; hit; ttl="

@@ -16,6 +16,13 @@ http:
         - imaging-validate-headers # after the cache: for the cache, this header comes from the backend
         - imaging-prefix
       service: imaging
+    # Errors stored too: here a missing source image (`404`) is stored like an image, for `defaultTtl`
+    imaging-cache-errors:
+      rule: PathPrefix(`/imaging-cache-errors`)
+      middlewares:
+        - imaging-cache-errors
+        - imaging-prefix
+      service: imaging
     imaging:
       rule: PathPrefix(`/imaging`)
       middlewares:
@@ -27,6 +34,7 @@ http:
     imaging-prefix:
       stripPrefix:
         prefixes:
+          - /imaging-cache-errors # first: /imaging-cache is its prefix
           - /imaging-cache
           - /imaging-validate
           - /imaging # last: the others start with it
@@ -39,6 +47,13 @@ http:
         traedis:
           redis:
             dsn: "redis://cache:6379/0"
+
+    imaging-cache-errors:
+      plugin:
+        traedis:
+          redis:
+            dsn: "redis://cache:6379/0"
+          statusCodes: [ 200, "400-499" ] # codes and ranges
 
   services:
     imaging:

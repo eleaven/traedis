@@ -3,6 +3,7 @@ package traedis
 import (
 	"context"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -86,11 +87,28 @@ func TestParseConfig(t *testing.T) {
 				}
 			},
 		},
-		{name: "invalid status code", mutate: func(c *Config) { c.StatusCodes = []int{200, 999} }, wantErr: "statusCodes"},
-		{name: "no status code", mutate: func(c *Config) { c.StatusCodes = []int{} }, wantErr: "statusCodes must not be empty"},
-		{name: "informational status code", mutate: func(c *Config) { c.StatusCodes = []int{200, 103} }, wantErr: "a 103 response is never stored"},
-		{name: "§3.3 partial content", mutate: func(c *Config) { c.StatusCodes = []int{200, 206} }, wantErr: "a 206 response is never stored"},
-		{name: "§3.2 not modified", mutate: func(c *Config) { c.StatusCodes = []int{304} }, wantErr: "a 304 response is never stored"},
+		{name: "invalid status code", mutate: func(c *Config) { c.StatusCodes = []string{"200", "999"} }, wantErr: `statusCodes: invalid status code "999"`},
+		{name: "status code that is not a number", mutate: func(c *Config) { c.StatusCodes = []string{"2xx"} }, wantErr: `statusCodes: invalid status code "2xx"`},
+		{name: "no status code", mutate: func(c *Config) { c.StatusCodes = []string{} }, wantErr: "statusCodes must not be empty"},
+		{name: "informational status code", mutate: func(c *Config) { c.StatusCodes = []string{"200", "103"} }, wantErr: "a 103 response is never stored"},
+		{name: "§3.3 partial content", mutate: func(c *Config) { c.StatusCodes = []string{"200", "206"} }, wantErr: "a 206 response is never stored"},
+		{name: "§3.2 not modified", mutate: func(c *Config) { c.StatusCodes = []string{"304"} }, wantErr: "a 304 response is never stored"},
+		{name: "range of a single code never stored", mutate: func(c *Config) { c.StatusCodes = []string{"304-304"} }, wantErr: "a 304 response is never stored"},
+		{name: "informational range", mutate: func(c *Config) { c.StatusCodes = []string{"100-199"} }, wantErr: "no response of 100-199 is ever stored"},
+		{name: "reversed range", mutate: func(c *Config) { c.StatusCodes = []string{"499-400"} }, wantErr: `statusCodes: invalid range "499-400"`},
+		{name: "range past 599", mutate: func(c *Config) { c.StatusCodes = []string{"500-600"} }, wantErr: `statusCodes: invalid range "500-600"`},
+		{name: "range without an end", mutate: func(c *Config) { c.StatusCodes = []string{"400-"} }, wantErr: `statusCodes: invalid range "400-"`},
+		{name: "range without a start", mutate: func(c *Config) { c.StatusCodes = []string{"-499"} }, wantErr: `statusCodes: invalid status code "-499"`},
+		{
+			name:   "ranges are expanded, without the codes never stored",
+			mutate: func(c *Config) { c.StatusCodes = []string{" 404", "300 - 304", "100-210", "404"} },
+			check: func(t *testing.T, s settings) {
+				want := []int{200, 201, 202, 203, 204, 205, 207, 208, 209, 210, 300, 301, 302, 303, 404}
+				if !reflect.DeepEqual(s.statusCodes, want) {
+					t.Errorf("statusCodes = %v, want %v", s.statusCodes, want)
+				}
+			},
+		},
 		{name: "zero maxBodyBytes", mutate: func(c *Config) { c.MaxBodyBytes = 0 }, wantErr: "maxBodyBytes"},
 		{name: "maxBodyBytes past what Redis takes", mutate: func(c *Config) { c.MaxBodyBytes = 512<<20 + 1 }, wantErr: "maxBodyBytes must not exceed"},
 		{name: "zero maxBufferedBytes", mutate: func(c *Config) { c.MaxBufferedBytes = 0 }, wantErr: "maxBufferedBytes must not be under maxBodyBytes"},
@@ -227,7 +245,7 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.Redis.MaxFailures = 5
 	cfg.Redis.RetryAfter = "1s"
 	cfg.Redis.TLS = RedisTLSConfig{CA: "", InsecureSkipVerify: false}
-	cfg.StatusCodes = []int{200}
+	cfg.StatusCodes = []string{"200"}
 	cfg.DefaultTTL = "5m"
 	cfg.StaleTTL = "1h"
 	cfg.DefaultStaleWhileRevalidate = "0s"

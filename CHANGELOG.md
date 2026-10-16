@@ -14,6 +14,10 @@ Remove deprecated header fields and fix security issues.
 - **`Pragma: no-cache` no longer bypasses the cache**: a request with it and without `Cache-Control` is now answered from the cache like any other. A client that must reach the backend sends `Cache-Control: no-cache`. RFC 9111 deprecates `Pragma` (§5.4).
 - **A `maxBodyBytes` over 64 MiB needs a `maxBufferedBytes` as large**: the new option bounds the bodies held in memory, and must leave room for the largest one. Without it, the middleware is refused when Traefik creates it.
 
+### Features
+
+- **Ranges in `statusCodes`**: `["200", "400-499"]` allows a `200` and any `4xx` to be stored, as the `errors` middleware of Traefik writes its ranges. A range keeps out the codes that are never stored (`206`, `304`), but one with none that can be (`100-199`) is refused. The codes written as numbers (`[200, 404]`) still work.
+
 ### Security
 
 - **A `GET` with content could poison the cache.** Its content is not part of the cache key, but some backends read parameters in it: what they answered was stored and served to the other clients of the URL. A `GET` or `HEAD` with content (`Content-Length` or `Transfer-Encoding`) is now forwarded untouched, with `Cache-Status: traedis; fwd=bypass`: it is not answered from the cache, and its response is not stored.

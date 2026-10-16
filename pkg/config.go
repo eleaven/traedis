@@ -23,7 +23,7 @@ const maxValueBytes = 512 << 20
 // Config is the plugin configuration, as written in the Traefik dynamic configuration.
 type Config struct {
 	Redis                       RedisConfig `json:"redis,omitempty"`
-	StatusCodes                 []int       `json:"statusCodes,omitempty"`
+	StatusCodes                 []string    `json:"statusCodes,omitempty"`
 	DefaultTTL                  string      `json:"defaultTtl,omitempty"`
 	StaleTTL                    string      `json:"staleTtl,omitempty"`
 	DefaultStaleWhileRevalidate string      `json:"defaultStaleWhileRevalidate,omitempty"`
@@ -68,7 +68,7 @@ func CreateConfig() *Config {
 			MaxFailures: 5,
 			RetryAfter:  "1s",
 		},
-		StatusCodes:                 []int{200},
+		StatusCodes:                 []string{"200"},
 		DefaultTTL:                  "5m",
 		StaleTTL:                    "1h",
 		DefaultStaleWhileRevalidate: "0s",
@@ -86,7 +86,7 @@ func CreateConfig() *Config {
 // settings is the validated, parsed form of Config.
 type settings struct {
 	redis                       redisOptions
-	statusCodes                 []int
+	statusCodes                 []int // sorted, ranges expanded (see parseStatusCodes)
 	defaultTTL                  time.Duration
 	staleTTL                    time.Duration
 	defaultStaleWhileRevalidate time.Duration
@@ -197,19 +197,9 @@ func parseConfig(cfg *Config) (settings, error) {
 		}
 	}
 
-	if len(cfg.StatusCodes) == 0 {
-		return s, errors.New("statusCodes must not be empty")
+	if s.statusCodes, err = parseStatusCodes(cfg.StatusCodes); err != nil {
+		return s, err
 	}
-	for _, code := range cfg.StatusCodes {
-		if code < 100 || code > 599 {
-			return s, fmt.Errorf("statusCodes: invalid status code %d", code)
-		}
-		// See storeTTL: these are never stored, whatever the configuration.
-		if code < 200 || code == http.StatusPartialContent || code == http.StatusNotModified {
-			return s, fmt.Errorf("statusCodes: a %d response is never stored", code)
-		}
-	}
-	s.statusCodes = append([]int(nil), cfg.StatusCodes...)
 
 	if cfg.MaxBodyBytes <= 0 {
 		return s, errors.New("maxBodyBytes must be positive")
@@ -245,6 +235,66 @@ func parseConfig(cfg *Config) (settings, error) {
 	s.exposeKey = cfg.ExposeKey
 
 	return s, nil
+}
+
+// parseStatusCodes parses statusCodes: codes (404) and inclusive ranges
+// (400-499), as Traefik writes them. It returns the codes that may be stored,
+// sorted and without duplicates.
+func parseStatusCodes(values []string) ([]int, error) {
+	if len(values) == 0 {
+		return nil, errors.New("statusCodes must not be empty")
+	}
+	var listed [600]bool
+	for _, value := range values {
+		from, to, err := parseStatusRange(value)
+		if err != nil {
+			return nil, err
+		}
+		storable := false
+		for code := from; code <= to; code++ {
+			if storableStatus(code) {
+				listed[code] = true
+				storable = true
+			}
+		}
+		if storable {
+			continue
+		}
+		if from == to {
+			return nil, fmt.Errorf("statusCodes: a %d response is never stored", from)
+		}
+		return nil, fmt.Errorf("statusCodes: no response of %d-%d is ever stored", from, to)
+	}
+	var codes []int
+	for code, ok := range listed {
+		if ok {
+			codes = append(codes, code)
+		}
+	}
+	return codes, nil
+}
+
+// parseStatusRange parses a code or a range of statusCodes into its bounds.
+func parseStatusRange(value string) (int, int, error) {
+	first, last, isRange := strings.Cut(strings.TrimSpace(value), "-")
+	from, err := strconv.Atoi(strings.TrimSpace(first))
+	if err != nil || from < 100 || from > 599 {
+		return 0, 0, fmt.Errorf("statusCodes: invalid status code %q", value)
+	}
+	if !isRange {
+		return from, from, nil
+	}
+	to, err := strconv.Atoi(strings.TrimSpace(last))
+	if err != nil || to < from || to > 599 {
+		return 0, 0, fmt.Errorf("statusCodes: invalid range %q", value)
+	}
+	return from, to, nil
+}
+
+// storableStatus reports whether a response with this status may be stored, if
+// statusCodes lists it (see storeTTL).
+func storableStatus(code int) bool {
+	return code >= 200 && code != http.StatusPartialContent && code != http.StatusNotModified
 }
 
 func parseDuration(name, value string) (time.Duration, error) {

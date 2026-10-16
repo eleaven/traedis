@@ -165,7 +165,7 @@ func TestRangeWithoutStoredResponse(t *testing.T) {
 func TestRangeOfAnotherStatus(t *testing.T) {
 	b := rangeBackend()
 	b.status = http.StatusNotFound
-	c, _ := newTestCache(t, b, func(cfg *Config) { cfg.StatusCodes = []int{200, 404} })
+	c, _ := newTestCache(t, b, func(cfg *Config) { cfg.StatusCodes = []string{"200", "404"} })
 	doRequest(c, http.MethodGet, testURL, nil)
 	rec := doRequest(c, http.MethodGet, testURL, http.Header{"Range": {"bytes=0-3"}})
 	if rec.Code != http.StatusNotFound || rec.Body.String() != "0123456789" || !isHit(lastCacheStatus(rec)) {
