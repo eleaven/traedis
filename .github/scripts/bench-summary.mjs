@@ -1,5 +1,6 @@
-// Prints results.json (written by run.sh) as markdown tables, for the summary of the CI job:
-//   node benchmark/summary.mjs >> "$GITHUB_STEP_SUMMARY"
+// Prints benchmark/results.json (written by benchmark/run.sh) as markdown tables, for the summary of the bench job
+// of ci.yml:
+//   node .github/scripts/bench-summary.mjs >> "$GITHUB_STEP_SUMMARY"
 import { readFileSync } from 'node:fs';
 
 const CASES = { direct: 'Without cache', hit: 'Cache hit', miss: 'Cache miss' };
@@ -61,7 +62,7 @@ function warning(result) {
   return result.expected_responses < 1 ? '⚠ ' + number(100 * result.expected_responses, 0) + '% expected responses' : '';
 }
 
-const raw = readFileSync(new URL('./results.json', import.meta.url), 'utf8');
+const raw = readFileSync(new URL('../../benchmark/results.json', import.meta.url), 'utf8');
 const results = JSON.parse(raw);
 
 function table(columns, rows) {

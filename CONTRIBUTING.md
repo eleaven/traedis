@@ -12,7 +12,8 @@ pkg/               # the plugin (package `traedis`): one concern per file, with 
   redis.go         #   the Redis client: RESP and connection pool
 example/           # Traefik configuration of the local stack: one dynamic file per sample backend
 e2e/               # end-to-end tests: Hurl files requesting Traefik
-benchmark/         # benchmarks under Yaegi, k6 load test, report for the CI
+benchmark/         # benchmarks under Yaegi, k6 load test
+.github/scripts/   # scripts of the CI: version and release notes, job summaries
 compose.yml        # local stack: Traefik, Redis, sample backends (whoami, placeholder, imgproxy), Redis Insight
 .traefik.yml       # plugin manifest of the Traefik Plugin Catalog
 VERSION            # the version to release

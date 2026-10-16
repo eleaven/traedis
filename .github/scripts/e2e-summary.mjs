@@ -1,8 +1,8 @@
-// Prints junit.xml (written by run.sh) as markdown:
-//   node e2e/summary.mjs >> "$GITHUB_STEP_SUMMARY"
+// Prints e2e/junit.xml (written by e2e/run.sh) as markdown, for the summary of the e2e job of ci.yml:
+//   node .github/scripts/e2e-summary.mjs >> "$GITHUB_STEP_SUMMARY"
 import { existsSync, readFileSync } from 'node:fs';
 
-const report = new URL('./junit.xml', import.meta.url);
+const report = new URL('../../e2e/junit.xml', import.meta.url);
 if (!existsSync(report)) {
   console.log('## Traedis end-to-end tests\n\nNo report: the tests did not run.');
   process.exit(0);

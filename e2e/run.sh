@@ -6,7 +6,7 @@
 #   docker compose up -d --wait ingress cache cache-tls whoami placeholder imaging
 #   ./e2e/run.sh
 #
-# The results are also written to e2e/junit.xml (see summary.mjs).
+# The results are also written to e2e/junit.xml (see .github/scripts/e2e-summary.mjs).
 # One file, with the stack up:
 #   docker compose run --rm hurl --test /e2e/tests/key.hurl
 set -euo pipefail

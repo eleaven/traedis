@@ -8,10 +8,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # vMAJOR.MINOR.PATCH, no leading zeros: what Go modules and the Traefik Plugin Catalog expect
-  SEMVER: '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-
 jobs:
   # Unit tests
   unit:
@@ -58,7 +54,7 @@ jobs:
       - run: ./e2e/run.sh
       - name: Report
         if: ${{ !cancelled() }}
-        run: node e2e/summary.mjs >> "$GITHUB_STEP_SUMMARY"
+        run: node .github/scripts/e2e-summary.mjs >> "$GITHUB_STEP_SUMMARY"
       - name: Logs
         if: failure()
         run: docker compose logs --no-color
@@ -80,7 +76,7 @@ jobs:
       - run: ./benchmark/run.sh
       # Not on failure: there is no results.json then
       - name: Report
-        run: node benchmark/summary.mjs >> "$GITHUB_STEP_SUMMARY"
+        run: node .github/scripts/bench-summary.mjs >> "$GITHUB_STEP_SUMMARY"
       - name: Logs
         if: failure()
         run: docker compose logs --no-color
@@ -101,63 +97,26 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # 1. Read ./VERSION, and fail when it is not a valid version
-      - name: Parse VERSION
-        run: |
-          version="$(<VERSION)"
-          if [[ ! "$version" =~ $SEMVER ]]; then
-            echo "::error file=VERSION::'$version' is not a valid version (expected vMAJOR.MINOR.PATCH, e.g. v1.2.3)"
-            exit 1
-          fi
-          echo "VERSION=$version" >> "$GITHUB_ENV"
+      # 1. Is ./VERSION a valid version, and a new one that follows the highest released one? The next steps only run
+      # for a new one
+      - name: Check the version
+        id: version
+        run: .github/scripts/version.sh
 
-      # 2. Is the version a new one, and does it follow the highest released one? The next steps only run for a new one
-      - name: Compare with the released versions
-        id: tags
-        run: |
-          set -euo pipefail
-
-          tags="$(git ls-remote --tags --refs origin | sed 's|.*refs/tags/||')"
-          if grep -qxF "$VERSION" <<< "$tags"; then
-            echo "$VERSION is already released: nothing to do"
-            echo "new=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
-          # Incremental: the next patch, minor or major of the highest released version
-          latest="$(grep -E "$SEMVER" <<< "$tags" | sort -V | tail -n 1 || true)"
-          if [[ "$latest" =~ $SEMVER ]]; then
-            major="${BASH_REMATCH[1]}"
-            minor="${BASH_REMATCH[2]}"
-            patch="${BASH_REMATCH[3]}"
-            next_patch="v$major.$minor.$((patch + 1))"
-            next_minor="v$major.$((minor + 1)).0"
-            next_major="v$((major + 1)).0.0"
-            if [[ "$VERSION" != "$next_patch" && "$VERSION" != "$next_minor" && "$VERSION" != "$next_major" ]]; then
-              echo "::error file=VERSION::$VERSION does not follow $latest (expected $next_patch, $next_minor or $next_major)"
-              exit 1
-            fi
-          fi
-
-          echo "new=true" >> "$GITHUB_OUTPUT"
-
-      # 3. The text of the release is the section of the version in CHANGELOG.md: what follows its `## vX.Y.Z` title, up to
-      # the next one
+      # 2. The text of the release: the section of the version in CHANGELOG.md
       - name: Read the notes of the version in CHANGELOG.md
-        if: steps.tags.outputs.new == 'true'
-        run: |
-          awk -v version="$VERSION" '/^## / { found = ($2 == version); next } found' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
-          if ! grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
-            echo "::error file=CHANGELOG.md::No section for $VERSION (expected a '## $VERSION' title followed by what the version changes)"
-            exit 1
-          fi
+        if: steps.version.outputs.new == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: .github/scripts/release-notes.sh "$VERSION" "$RUNNER_TEMP/notes.md"
 
-      # 4. Create the tag and the release, with the GitHub CLI of the runner: no third-party action in the job, which may
+      # 3. Create the tag and the release, with the GitHub CLI of the runner: no third-party action in the job, which may
       # write to the repository. --generate-notes adds the link to the comparison with the previous version after the notes
       - name: Create the tag and the release
-        if: steps.tags.outputs.new == 'true'
+        if: steps.version.outputs.new == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: >-
           gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$VERSION"
           --notes "$(< "$RUNNER_TEMP/notes.md")" --generate-notes
