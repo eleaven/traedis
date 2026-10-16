@@ -33,7 +33,7 @@ const (
 	// one item per field asked for.
 	maxArrayItems = 16
 	// largeArgBytes is the size from which an argument is written as it is,
-	// instead of being copied into the command (see encodeLargeCommand).
+	// instead of being copied into the command (see writeCommand).
 	largeArgBytes = 16 << 10
 	logInterval   = time.Minute
 )
@@ -424,18 +424,17 @@ func roundTrip(ctx context.Context, conn *redisConn, maxBulk int64, args [][]byt
 	return readReply(conn.r, maxBulk)
 }
 
-// writeCommand sends a command: in one buffer, unless it is large (see
-// encodeLargeCommand).
+// writeCommand sends a command in one write. Its large arguments, the bodies,
+// are not copied into it: they go to the connection as they are.
 func writeCommand(nc net.Conn, args [][]byte) error {
 	size := 16
 	for _, a := range args {
-		size += len(a) + 16
+		size += 16
+		if len(a) < largeArgBytes {
+			size += len(a)
+		}
 	}
-	if size >= largeArgBytes {
-		command := encodeLargeCommand(args)
-		_, err := command.WriteTo(nc)
-		return err
-	}
+	var bufs net.Buffers
 	b := make([]byte, 0, size)
 	b = append(b, '*')
 	b = strconv.AppendInt(b, int64(len(args)), 10)
@@ -444,35 +443,22 @@ func writeCommand(nc net.Conn, args [][]byte) error {
 		b = append(b, '$')
 		b = strconv.AppendInt(b, int64(len(a)), 10)
 		b = append(b, '\r', '\n')
-		b = append(b, a...)
-		b = append(b, '\r', '\n')
-	}
-	_, err := nc.Write(b)
-	return err
-}
-
-// encodeLargeCommand encodes a command without copying its large arguments,
-// the bodies: they go to the connection as they are, in one write with the
-// rest.
-func encodeLargeCommand(args [][]byte) net.Buffers {
-	var bufs net.Buffers
-	b := make([]byte, 0, 256)
-	b = append(b, '*')
-	b = strconv.AppendInt(b, int64(len(args)), 10)
-	b = append(b, '\r', '\n')
-	for _, a := range args {
-		b = append(b, '$')
-		b = strconv.AppendInt(b, int64(len(a)), 10)
-		b = append(b, '\r', '\n')
 		if len(a) >= largeArgBytes {
+			// What follows it goes on in the rest of the same buffer.
 			bufs = append(bufs, b, a)
-			b = make([]byte, 0, 256)
+			b = b[len(b):]
 		} else {
 			b = append(b, a...)
 		}
 		b = append(b, '\r', '\n')
 	}
-	return append(bufs, b)
+	if bufs == nil {
+		_, err := nc.Write(b)
+		return err
+	}
+	bufs = append(bufs, b)
+	_, err := bufs.WriteTo(nc)
+	return err
 }
 
 // readReply reads one RESP2 reply: a status, an error, an integer, or an array
