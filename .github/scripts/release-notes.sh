@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Prints the notes of a version for the release job of ci.yml: its section in CHANGELOG.md, what follows its
-# `## vX.Y.Z` title up to the next one. Fails when there is none.
+# Prints the notes of a version for the version and release jobs of ci.yml: its section in CHANGELOG.md, what
+# follows its `## vX.Y.Z` title up to the next one. Fails when there is none.
 #
 # CHANGELOG.md is Markdown, whose line breaks inside a paragraph are spaces; GitHub keeps them in the text of a
 # release. So the lines of each paragraph, list item and quote are joined, but for a hard break (a line ending with

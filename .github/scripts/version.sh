@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Checks ./VERSION for the release job of ci.yml, and fails when it is not vMAJOR.MINOR.PATCH, or when it is a new
+# Checks ./VERSION for the version job of ci.yml, and fails when it is not vMAJOR.MINOR.PATCH, or when it is a new
 # version that does not follow the highest released one. Writes to $GITHUB_OUTPUT (stdout outside of the CI):
 #   version=vX.Y.Z
 #   new=true|false  (false: already released, nothing to do)

@@ -62,8 +62,9 @@ the benchmarks, for information only.
 
 The version is the content of `VERSION` (`vMAJOR.MINOR.PATCH`). To release, set it to the next patch, minor or major of the last release,
 and describe it in a `## vX.Y.Z` section at the top of [`CHANGELOG.md`](CHANGELOG.md): what it breaks, adds and fixes for those who use the
-plugin. On `main`, once the tests pass, the CI checks the version, then creates its tag and its GitHub release with that section as its
-text. Without the section, nothing is released.
+plugin. The CI checks both on every pull request: a new version must follow the last release and have its section. On `main`, once the
+tests pass, it creates the tag and the GitHub release of a new version, with that section as its text; its `release` job is skipped
+otherwise.
 
 [ci]: https://github.com/eleaven/traedis/actions/workflows/ci.yml
 [rfc9111]: https://www.rfc-editor.org/rfc/rfc9111
