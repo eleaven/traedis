@@ -2,6 +2,7 @@ package traedis
 
 import (
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 )
@@ -124,6 +125,11 @@ func TestRangeFromStoredResponse(t *testing.T) {
 
 // §14.6: several ranges come as the parts of a multipart/byteranges body.
 func TestRangeSeveralParts(t *testing.T) {
+	// Since Go 1.26.9, http.ServeContent ignores a Range header with more
+	// ranges than this, which is 1 for a module older than go 1.26 like this
+	// one. The test takes the default of a recent one (in Traefik, it is up to
+	// its build). An older Go ignores the setting.
+	t.Setenv("GODEBUG", strings.TrimPrefix(os.Getenv("GODEBUG")+",httpservecontentmaxranges=200", ","))
 	b := rangeBackend()
 	c, _ := newTestCache(t, b, nil)
 	doRequest(c, http.MethodGet, testURL, nil)
