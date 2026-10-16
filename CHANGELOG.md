@@ -3,7 +3,8 @@
 What each release changes for those who use the plugin, the latest first. The section of a version is the text of its
 [GitHub release](https://github.com/eleaven/traedis/releases): the CI reads it from this file.
 
-<!-- One line per paragraph and per list item: GitHub keeps the line breaks of the text of a release. -->
+<!-- Plain Markdown: GitHub keeps the line breaks of the text of a release, so the CI joins the lines of each paragraph,
+     list item and quote (see .github/scripts/release-notes.sh). A line ending with a backslash keeps its break. -->
 
 ## v0.3.0
 
