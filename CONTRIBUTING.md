@@ -57,7 +57,8 @@ make help        # list all targets
 
 ## Pull requests and releases
 
-`make test` has to pass: the [CI][ci] runs the same tests on every pull request, without `make`, which is for developers. It also runs the benchmarks, for information only.
+`make test` has to pass: the [CI][ci] runs the same tests on every pull request, without `make`, which is for developers. It also runs
+the benchmarks, for information only.
 
 The version is the content of `VERSION` (`vMAJOR.MINOR.PATCH`). To release, set it to the next patch, minor or major of the last release,
 and describe it in a `## vX.Y.Z` section at the top of [`CHANGELOG.md`](CHANGELOG.md): what it breaks, adds and fixes for those who use the
