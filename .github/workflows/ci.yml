@@ -32,17 +32,32 @@ jobs:
         run: test -z "$(gofmt -l .)"
       - run: go vet ./...
       - run: go test -race ./...
-      # Each fuzzer for a short while: their seeds already ran with the tests
+      # The interpreter Traefik v3.7 embeds: this is what runs in production.
+      - run: go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1
+      - run: yaegi test -v .
+        working-directory: pkg
+
+  # Each fuzzer for a short while: their seeds already ran with the unit tests. No Redis: they only parse
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.26"
       - name: Fuzz
         run: |
           for target in $(go test -list '^Fuzz' ./pkg | grep '^Fuzz'); do
             echo "# $target"
             go test -run '^$' -fuzz "^$target\$" -fuzztime 10s ./pkg
           done
-      # The interpreter Traefik v3.7 embeds: this is what runs in production.
-      - run: go install github.com/traefik/yaegi/cmd/yaegi@v0.16.1
-      - run: yaegi test -v .
-        working-directory: pkg
+      # The input that failed, written to pkg/testdata/fuzz on the runner: to commit with its fix
+      - name: Failing input
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-testdata
+          path: pkg/testdata/fuzz
 
   # End-to-end tests: the plugin loaded by Traefik (Yaegi), with Redis and the sample backends
   e2e:
@@ -108,7 +123,7 @@ jobs:
   # Release of a new version, on main only and once the tests pass: its tag and its GitHub release. Skipped otherwise,
   # which tells at a glance whether a push released something
   release:
-    needs: [ unit, e2e, version ]
+    needs: [ unit, fuzz, e2e, version ]
     if: github.event_name == 'push' && needs.version.outputs.new == 'true'
     runs-on: ubuntu-latest
     # One release at a time: two pushes must not race for the same tag

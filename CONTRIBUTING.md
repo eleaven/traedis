@@ -49,7 +49,7 @@ make help        # list all targets
 - **The README is the specification.** A change of behaviour updates its "Caching rules" or "Security" section. An option is declared in
   `pkg/config.go`, in the README table and in the `testData` of `.traefik.yml`.
 - **What parses untrusted data has a fuzzer** in `pkg/fuzz_test.go`. An input that `make fuzz` finds is committed with its fix, in
-  `pkg/testdata/fuzz`: it then runs with the tests.
+  `pkg/testdata/fuzz`: it then runs with the tests. One that the CI finds is in the `fuzz-testdata` artifact of its `fuzz` job.
 - **Every bug fix comes with a regression test**, and what is visible through Traefik with an end-to-end one. The files of `e2e/tests/` run
   in parallel: each one only requests URLs that its own `{{newUuid}}` makes unique.
 - **Keep the code simple.** Concise and easy to follow, with comments that give the reason rather than repeat the code: the RFC section
