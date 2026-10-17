@@ -51,6 +51,8 @@ func (i *invalidateHook) beforeHeader(code int, h http.Header) disposition {
 			i.status.detail = "redis"
 		}
 	}
-	h.Add("Cache-Status", i.status.String())
+	if i.c.cfg.exposeCacheStatus {
+		h.Add("Cache-Status", i.status.String())
+	}
 	return passOn
 }

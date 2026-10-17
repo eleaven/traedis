@@ -90,6 +90,12 @@ http:
         - whoami-auth # before the cache: a hit is served without running what comes after it
         - whoami-authorization
       service: whoami
+    # Cache-Status hidden from clients: `Age` still tells a response that comes from the cache
+    whoami-hidden:
+      rule: PathPrefix(`/whoami-hidden`)
+      middlewares:
+        - whoami-hidden
+      service: whoami
     whoami:
       rule: PathPrefix(`/whoami`)
       service: whoami
@@ -150,6 +156,12 @@ http:
           redis:
             dsn: "redis://cache:6379/2"
           authorizationHeaders: [ X-WebAuth-User ]
+    whoami-hidden:
+      plugin:
+        traedis:
+          redis:
+            dsn: "redis://cache:6379/2"
+          exposeCacheStatus: false
     whoami-vary:
       plugin:
         traedis:

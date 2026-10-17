@@ -91,7 +91,8 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `sortQuery`                    | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
 | `authorizationHeaders`         | `[]`                   | Request header fields that tell who the client is, as `Authorization` does (`X-WebAuth-User`): see [Security](#security).                      |
 | `ignoreClientCacheControl`     | `true`                 | Ignore the `Cache-Control` of requests, whose directives are advisory: see [Sent by the client](#sent-by-the-client).                          |
-| `exposeKey`                    | `false`                | Add the [Redis key](#cacheable-responses) to the `Cache-Status` header (`key="…"`).                                                            |
+| `exposeCacheStatus`            | `true`                 | Add the [`Cache-Status`](#added-by-traedis) header to the responses: what the cache did. See [Security](#security).                            |
+| `exposeKey`                    | `false`                | Add the [Redis key](#cacheable-responses) to the `Cache-Status` header (`key="…"`). Requires `exposeCacheStatus`.                              |
 
 ## HTTP headers
 
@@ -153,7 +154,7 @@ Traedis adds these to the responses it sends to the client, and to the requests 
 - `Age`: on a response served from the cache, the seconds since the backend made it.
 - `If-None-Match`, `If-Modified-Since`: sent to the backend in place of those of the client, to
   [validate](#conditional-requests) a stored response.
-- `Cache-Status: traedis; …`: on every response, what the cache did ([RFC 9211][rfc9211]):
+- `Cache-Status: traedis; …`: on every response, what the cache did ([RFC 9211][rfc9211]), unless `exposeCacheStatus` is `false`:
   - `hit; ttl=N`: served from the cache, fresh for `N` more seconds.
   - `hit; ttl=-N; detail=stale-while-revalidate`: served from the cache, stale by `N` seconds, and refreshed in the background.
   - `hit; ttl=-N; detail=max-stale`: served from the cache, stale by `N` seconds, as the request allows (`ignoreClientCacheControl: false`).
@@ -349,6 +350,10 @@ A shared cache gives the response made for one client to all the others. The def
   `http` requests to `https` then answers the `https` ones too, which follow it in a loop.
 - **Clients can always reach the backend.** A random query string is a miss (and `Cache-Control: no-cache` skips the cache, with
   `ignoreClientCacheControl: false`): put a `rateLimit` before it.
+- **Clients can tell what others requested.** A response served from the cache has a `Cache-Status` that says so, and an `Age`, which
+  [RFC 9111 §4][rfc9111] requires: a client learns whether someone else requested a URL (`/export?user=42`), and when. With
+  `exposeCacheStatus: false`, clients no longer see what the cache did (`fwd-status` of the backend, `detail=redis`…), but `Age` still
+  tells a hit. `only-if-cached` would tell it without storing the URL: it is ignored by default.
 - **Bodies are held in memory.** A response is copied in full to be stored, and a stored one is read in full from Redis to be sent: each
   one stays in the memory of Traefik until its client got it all, which a slow client makes last. Past `maxBufferedBytes` for all of them
   (bodies up to 32 KiB are not counted, no more than what Traefik buffers anyway), a response is sent without being stored, and a stored

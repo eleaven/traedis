@@ -37,6 +37,7 @@ type Config struct {
 	SortQuery                   bool        `json:"sortQuery,omitempty"`
 	AuthorizationHeaders        []string    `json:"authorizationHeaders,omitempty"`
 	IgnoreClientCacheControl    bool        `json:"ignoreClientCacheControl,omitempty"`
+	ExposeCacheStatus           bool        `json:"exposeCacheStatus,omitempty"`
 	ExposeKey                   bool        `json:"exposeKey,omitempty"`
 }
 
@@ -84,6 +85,7 @@ func CreateConfig() *Config {
 		SortQuery:                   false,
 		AuthorizationHeaders:        []string{},
 		IgnoreClientCacheControl:    true,
+		ExposeCacheStatus:           true,
 		ExposeKey:                   false,
 	}
 }
@@ -116,6 +118,7 @@ type settings struct {
 	// ignoreClientCacheControl makes the cache act as if requests had no
 	// Cache-Control (see ServeHTTP).
 	ignoreClientCacheControl bool
+	exposeCacheStatus        bool
 	exposeKey                bool
 }
 
@@ -242,6 +245,11 @@ func parseConfig(cfg *Config) (settings, error) {
 		return s, err
 	}
 	s.ignoreClientCacheControl = cfg.IgnoreClientCacheControl
+	// The key is part of Cache-Status.
+	if cfg.ExposeKey && !cfg.ExposeCacheStatus {
+		return s, errors.New("exposeKey requires exposeCacheStatus")
+	}
+	s.exposeCacheStatus = cfg.ExposeCacheStatus
 	s.exposeKey = cfg.ExposeKey
 
 	return s, nil

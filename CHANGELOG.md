@@ -28,6 +28,9 @@ deprecated `Pragma` header field is read any more: see the breaking changes befo
 
 ### Features
 
+- **`exposeCacheStatus`**: `false` hides the `Cache-Status` header from clients, which then no longer see what the cache did: the status of
+  the backend behind a stale response, Redis down, memory full… It is `true` by default: `Age`, which RFC 9111 requires on a response
+  served from the cache, tells a hit all the same. `exposeKey` requires it.
 - **Ranges in `statusCodes`**: `["200-399", "404"]` allows any `2xx` or `3xx` and a `404` to be stored, as the `errors` middleware of
   Traefik writes its ranges. A range keeps out the codes that are never stored (`206`, `304`), but one with none that can be (`100-199`) is
   refused. The codes written as numbers (`[200, 404]`) still work.
@@ -66,6 +69,8 @@ deprecated `Pragma` header field is read any more: see the breaking changes befo
 
 ### Documentation
 
+- **[Security](https://github.com/eleaven/traedis/blob/v0.3.0/README.md#security): clients can tell what others requested.** A response
+  served from the cache says so, in its `Cache-Status` and its `Age`: a client learns whether someone else requested a URL, and when.
 - **[Security](https://github.com/eleaven/traedis/blob/v0.3.0/README.md#security): clients can remove stored responses.** As RFC 9111
   requires, a `2xx` or a `3xx` answer to an unsafe method, even an unknown one, removes the stored responses of its URL: a backend that
   answers any method like a `GET`, or redirects an anonymous `POST` to its login page, lets anyone empty the cache. The README tells how to

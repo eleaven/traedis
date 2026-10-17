@@ -755,6 +755,35 @@ func TestCacheStatusAppendedAfterUpstream(t *testing.T) {
 	}
 }
 
+// Without exposeCacheStatus, nothing tells clients what the cache did.
+func TestCacheStatusHidden(t *testing.T) {
+	b := cacheableBackend()
+	c, st := newTestCache(t, b, func(cfg *Config) { cfg.ExposeCacheStatus = false })
+	storeAged(t, st, "max-age=60", 2*time.Minute)
+	requests := []struct {
+		method string
+		target string
+		header http.Header
+	}{
+		{method: http.MethodGet, target: testURL},  // miss
+		{method: http.MethodGet, target: testURL},  // hit
+		{method: http.MethodGet, target: staleURL}, // stale
+		{method: http.MethodHead, target: testURL},
+		{method: http.MethodGet, target: testURL, header: http.Header{"Upgrade": {"websocket"}}},
+		{method: http.MethodOptions, target: testURL},
+		{method: http.MethodPost, target: testURL},
+	}
+	for _, r := range requests {
+		rec := doRequest(c, r.method, r.target, r.header)
+		if got := rec.Header().Values("Cache-Status"); len(got) != 0 {
+			t.Errorf("%s %s: Cache-Status = %q, want none", r.method, r.target, got)
+		}
+	}
+	if b.calls != 5 {
+		t.Errorf("backend calls = %d: the cache works as before", b.calls)
+	}
+}
+
 func TestExposeKey(t *testing.T) {
 	b := cacheableBackend()
 	c, _ := newTestCache(t, b, func(cfg *Config) { cfg.ExposeKey = true })

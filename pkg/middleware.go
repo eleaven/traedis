@@ -287,7 +287,9 @@ func (c *cache) ready(r *http.Request, key, field string, e *entry) bool {
 // hide http.Flusher from the backend). Cache-Status is set before the
 // backend's own values.
 func (c *cache) passThrough(w http.ResponseWriter, r *http.Request, fwd string) {
-	w.Header().Add("Cache-Status", cacheStatus{fwd: fwd}.String())
+	if c.cfg.exposeCacheStatus {
+		w.Header().Add("Cache-Status", cacheStatus{fwd: fwd}.String())
+	}
 	c.next.ServeHTTP(w, r)
 }
 
@@ -327,8 +329,10 @@ func (c *cache) serve(w http.ResponseWriter, r *http.Request, e *entry, age, lif
 		h.Set("Date", e.responseTime.UTC().Format(http.TimeFormat))
 	}
 	h.Set("Age", strconv.FormatInt(int64(age/time.Second), 10))
-	status.ttl = lifetime - age
-	h.Add("Cache-Status", status.String())
+	if c.cfg.exposeCacheStatus {
+		status.ttl = lifetime - age
+		h.Add("Cache-Status", status.String())
+	}
 	if e.status == http.StatusOK && notModified(r.Header, e.header, e.responseTime) {
 		notModifiedHeader(h)
 		w.WriteHeader(http.StatusNotModified)
@@ -769,8 +773,10 @@ func (m *missHook) beforeHeader(code int, h http.Header) disposition {
 	if m.head && code == http.StatusOK {
 		m.headHeader = h.Clone()
 	}
-	m.status.fwdStatus = code
-	h.Add("Cache-Status", m.status.String())
+	if m.c.cfg.exposeCacheStatus {
+		m.status.fwdStatus = code
+		h.Add("Cache-Status", m.status.String())
+	}
 	if m.store {
 		return keepCopy
 	}

@@ -31,4 +31,5 @@ testData:
   sortQuery: false
   authorizationHeaders: [ ]
   ignoreClientCacheControl: true
+  exposeCacheStatus: true
   exposeKey: false

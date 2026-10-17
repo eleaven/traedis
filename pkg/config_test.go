@@ -31,8 +31,8 @@ func TestCreateConfigDefaults(t *testing.T) {
 	if s.maxRevalidations != 10 || s.revalidationTimeout != 30*time.Second {
 		t.Errorf("maxRevalidations = %d, revalidationTimeout = %v", s.maxRevalidations, s.revalidationTimeout)
 	}
-	if len(s.authorizationHeaders) != 0 || !s.ignoreClientCacheControl {
-		t.Errorf("authorizationHeaders = %v, ignoreClientCacheControl = %v", s.authorizationHeaders, s.ignoreClientCacheControl)
+	if len(s.authorizationHeaders) != 0 || !s.ignoreClientCacheControl || !s.exposeCacheStatus {
+		t.Errorf("authorizationHeaders = %v, ignoreClientCacheControl = %v, exposeCacheStatus = %v", s.authorizationHeaders, s.ignoreClientCacheControl, s.exposeCacheStatus)
 	}
 	if s.maxBodyBytes != 5242880 || s.maxBufferedBytes != 64<<20 || s.maxVariants != 16 || s.sortQuery || s.exposeKey {
 		t.Errorf("settings = %+v", s)
@@ -124,6 +124,7 @@ func TestParseConfig(t *testing.T) {
 				}
 			},
 		},
+		{name: "exposeKey without exposeCacheStatus", mutate: func(c *Config) { c.ExposeCacheStatus = false; c.ExposeKey = true }, wantErr: "exposeKey requires exposeCacheStatus"},
 		{name: "zero maxBodyBytes", mutate: func(c *Config) { c.MaxBodyBytes = 0 }, wantErr: "maxBodyBytes"},
 		{name: "maxBodyBytes past what Redis takes", mutate: func(c *Config) { c.MaxBodyBytes = 512<<20 + 1 }, wantErr: "maxBodyBytes must not exceed"},
 		{name: "zero maxBufferedBytes", mutate: func(c *Config) { c.MaxBufferedBytes = 0 }, wantErr: "maxBufferedBytes must not be under maxBodyBytes"},
@@ -273,6 +274,7 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.SortQuery = false
 	cfg.AuthorizationHeaders = []string{}
 	cfg.IgnoreClientCacheControl = true
+	cfg.ExposeCacheStatus = true
 	cfg.ExposeKey = false
 
 	if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "cache"); err != nil {
