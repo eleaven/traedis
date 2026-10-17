@@ -56,6 +56,10 @@ deprecated `Pragma` header field is read any more: see the breaking changes befo
   answers, got a response that may not be stored (an error, `private`, `Set-Cookie`, a body too large…), which removed the stored response.
   It now keeps it, but for a `404` or a `410`: the resource is gone. Neither does a `304` that may not be stored remove it any more, nor a
   `HEAD` whose response does not have the validators of a fresh stored response.
+- **A request for many ranges got an answer many times larger than itself.** Each range of a stored response is sent as a part of its own,
+  with its header fields: with `bytes=0-0,2-2,…`, a request of a few kilobytes got an answer tens of times larger, from a response that the
+  backend made once, and even from a backend that does not serve ranges. A request for more than 16 ranges now gets the whole response, as
+  RFC 9110 allows (§14.2).
 - **Clients could make Traefik use as much memory as they wanted.** A response is copied in full to be stored, and a stored one read in full
   from Redis to be sent, and each one stays in memory until its client got it all: many slow requests for large responses added up without
   bound. The new `maxBufferedBytes` option (`64 MiB`) bounds the bodies a middleware holds at once (those up to 32 KiB are not counted):

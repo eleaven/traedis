@@ -12,12 +12,22 @@ import (
 // backend would. Without a stored response, the request reaches the backend as
 // it is, and a 206 is not stored.
 
+// maxRanges bounds the ranges a request may ask for: with more, it gets the
+// whole response, as §14.2 allows. Each range is a part of the body with its
+// own header fields: many small ones (bytes=0-0,2-2,…) would make the answer
+// many times larger than the request, and than the body, from a response that
+// the backend made once. http.ServeContent has a bound of its own since Go
+// 1.26.9, which depends on how Traefik is built: this one does not.
+const maxRanges = 16
+
 // wantsRange reports whether a GET with header req asks for byte ranges of
 // the stored 200 response with header resp. Another range unit is ignored
-// (§14.2), and so are ranges that the backend said it does not serve.
+// (§14.2), and so are ranges that the backend said it does not serve, and more
+// than maxRanges of them: they are counted by their commas, as they are not
+// parsed here.
 func wantsRange(req, resp http.Header) bool {
 	ranges := req["Range"]
-	return len(ranges) > 0 && strings.HasPrefix(ranges[0], "bytes=") &&
+	return len(ranges) > 0 && strings.HasPrefix(ranges[0], "bytes=") && strings.Count(ranges[0], ",") < maxRanges &&
 		!strings.EqualFold(strings.TrimSpace(resp.Get("Accept-Ranges")), "none")
 }
 

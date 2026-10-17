@@ -61,3 +61,12 @@ HTTP 416
 [Asserts]
 header "Cache-Status" contains "traedis; hit; ttl="
 header "Content-Range" == "bytes */{{length}}"
+
+# More than 16 ranges (RFC 9110 §14.2): the whole response, rather than a part for each one
+GET {{base_url}}/imaging-cache/B_7JSu2g6c6gISXWevLdHUvpMHw_HJm5zrr9TOlxVSk/rs:fill:300:200/plain/http://placeholder:3000/600x400@avif?range={{run}}
+Range: bytes=0-0,2-2,4-4,6-6,8-8,10-10,12-12,14-14,16-16,18-18,20-20,22-22,24-24,26-26,28-28,30-30,32-32
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; hit; ttl="
+header "Content-Range" not exists
+header "Content-Length" == "{{length}}"

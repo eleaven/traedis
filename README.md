@@ -260,8 +260,9 @@ Only whole responses are stored. A `GET` for some bytes of one (`Range: bytes=0-
 ([RFC 9110 §14](https://www.rfc-editor.org/rfc/rfc9110#section-14)):
 
 - with a `206 Partial Content` that has these bytes, in several parts when it asks for several ranges, or a `416` when there are none;
-- with the whole response when its `If-Range` is not the `ETag` or the `Last-Modified` of the stored one, or when the backend said
-  `Accept-Ranges: none`;
+- with the whole response when its `If-Range` is not the `ETag` or the `Last-Modified` of the stored one, when the backend said
+  `Accept-Ranges: none`, or when it asks for more than 16 ranges: each one would be a part with header fields of its own, and many small
+  ones (`bytes=0-0,2-2,…`) an answer many times larger than the request;
 - with a `304` when its `If-None-Match` or `If-Modified-Since` says it already has the response: these [conditions](#conditional-requests)
   come first.
 

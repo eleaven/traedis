@@ -3,6 +3,7 @@ package traedis
 import (
 	"net/http"
 	"os"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -142,6 +143,38 @@ func TestRangeSeveralParts(t *testing.T) {
 		if !strings.Contains(body, part) {
 			t.Errorf("body = %q, want it to contain %q", body, part)
 		}
+	}
+}
+
+// §14.2: past maxRanges, a request gets the whole response, not one part per
+// range, which would make the answer many times larger than the request.
+func TestTooManyRanges(t *testing.T) {
+	t.Setenv("GODEBUG", strings.TrimPrefix(os.Getenv("GODEBUG")+",httpservecontentmaxranges=200", ",")) // see TestRangeSeveralParts
+	body := strings.Repeat("0123456789", 4)
+	ranges := func(n int) string {
+		var r []string
+		for i := 0; i < n; i++ {
+			r = append(r, strconv.Itoa(2*i)+"-"+strconv.Itoa(2*i))
+		}
+		return "bytes=" + strings.Join(r, ",")
+	}
+	b := rangeBackend()
+	b.body = body
+	c, _ := newTestCache(t, b, nil)
+	doRequest(c, http.MethodGet, testURL, nil)
+
+	rec := doRequest(c, http.MethodGet, testURL, http.Header{"Range": {ranges(maxRanges)}})
+	if rec.Code != http.StatusPartialContent || strings.Count(rec.Body.String(), "Content-Range: ") != maxRanges {
+		t.Errorf("%d ranges: got %d with %d parts, want a 206 with one part each", maxRanges, rec.Code, strings.Count(rec.Body.String(), "Content-Range: "))
+	}
+	for _, r := range []string{ranges(maxRanges + 1), ranges(maxRanges) + ",,"} {
+		rec = doRequest(c, http.MethodGet, testURL, http.Header{"Range": {r}})
+		if rec.Code != http.StatusOK || rec.Body.String() != body || rec.Header().Get("Content-Range") != "" || !isHit(lastCacheStatus(rec)) {
+			t.Errorf("Range: %s: got %d %q %v, want the whole stored response", r, rec.Code, rec.Body.String(), rec.Header())
+		}
+	}
+	if b.calls != 1 {
+		t.Errorf("backend calls = %d: answered from the cache", b.calls)
 	}
 }
 
