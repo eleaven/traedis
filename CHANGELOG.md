@@ -3,7 +3,7 @@
 What each release changes for those who use the plugin, the latest first. The section of a version is the text of its
 [GitHub release](https://github.com/eleaven/traedis/releases): the CI reads it from this file.
 
-## v0.3.0
+## v0.3.0 – 2026-10-17
 
 Security fixes, and a cache that stores more by default. Clients can no longer poison the cache with the content of a `GET`, replace a
 stored response with what the backend answers to their own request, remove one through its background refresh, nor make Traefik hold as much
