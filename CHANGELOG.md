@@ -51,10 +51,11 @@ deprecated `Pragma` header field is read any more: see the breaking changes befo
   they answered was stored and served to the other clients of the URL. A `GET` or `HEAD` with content (`Content-Length` or
   `Transfer-Encoding`) is now forwarded untouched, with `Cache-Status: traedis; fwd=bypass`: it is not answered from the cache, and its
   response is not stored.
-- **A client could remove a stored response** during its `stale-while-revalidate` window. The background refresh is the request that got the
-  stale response, with its header fields: an invalid `Authorization` or cookie, or any header field the backend rejects, got an error from
-  it, which removed the stored response. A `4xx` now keeps it, as a `5xx` or a `429` already did, but for a `404` or a `410`: the resource
-  is gone.
+- **A client could remove a stored response** with a safe method. The background refresh of `stale-while-revalidate` is the request that got
+  the stale response, with its header fields: an invalid `Authorization` or cookie, or any header field that changes what the backend
+  answers, got a response that may not be stored (an error, `private`, `Set-Cookie`, a body too large…), which removed the stored response.
+  It now keeps it, but for a `404` or a `410`: the resource is gone. Neither does a `304` that may not be stored remove it any more, nor a
+  `HEAD` whose response does not have the validators of a fresh stored response.
 - **Clients could make Traefik use as much memory as they wanted.** A response is copied in full to be stored, and a stored one read in full
   from Redis to be sent, and each one stays in memory until its client got it all: many slow requests for large responses added up without
   bound. The new `maxBufferedBytes` option (`64 MiB`) bounds the bodies a middleware holds at once (those up to 32 KiB are not counted):

@@ -466,22 +466,17 @@ func staleIfErrorStatus(status int) bool {
 	return false
 }
 
-// supersedes reports whether e, a response to a background revalidation that
-// is not stored, replaces the stored one anyway, which must then be deleted.
-// Clients must not be able to evict entries, and the request that triggered
-// the revalidation is forwarded as it is. So an error does not: the backend
-// is failing or throttling (5xx, 429), or rejects that request (its
-// Authorization, its cookies, its header fields…), but for a 404 or a 410,
-// which say the resource is gone. Neither does a response only refused
-// because of the Authorization, authorizationHeaders or Cookie of that
-// request: a request without them would get it stored. cc is the Cache-Control of e.
-func supersedes(e *entry, cc cacheControl, cfg settings) bool {
-	if e.status >= 400 && e.status != http.StatusNotFound && e.status != http.StatusGone {
-		return false
-	}
-	anonymous := &http.Request{Method: http.MethodGet, Header: http.Header{}}
-	_, ok := storeTTL(anonymous, parseCacheControl(nil), e, cc, cfg)
-	return !ok
+// gone reports whether the status of the response to a background
+// revalidation says that the resource is gone (404, 410): the stored response
+// is then deleted, unless this one is stored in its place. Any other response
+// that is not stored leaves it as it is, to be served stale for as long as it
+// is allowed. The revalidation is the request of a client, with its header
+// fields, and clients must not be able to evict entries: with its cookies,
+// its Authorization or a header field of its own, it gets a response that
+// may not be stored (private, Set-Cookie, an error…), which says nothing of
+// the stored one.
+func gone(status int) bool {
+	return status == http.StatusNotFound || status == http.StatusGone
 }
 
 // clientOnly lists the request header fields that only concern the

@@ -993,8 +993,8 @@ func TestStaleVariantIsRevalidated(t *testing.T) {
 	}
 }
 
-func TestSupersededVariantIsDeleted(t *testing.T) {
-	b := &backend{header: http.Header{"Cache-Control": {"no-store"}}, body: "hello"}
+func TestGoneVariantIsDeleted(t *testing.T) {
+	b := &backend{status: http.StatusNotFound, header: http.Header{}, body: "gone"}
 	c, st := newTestCache(t, b, nil)
 	names := []string{"Accept-Language"}
 	key := cacheKey(varyURL)
@@ -1021,7 +1021,7 @@ func TestSupersededVariantIsDeleted(t *testing.T) {
 	}
 	waitRevalidations(t, c)
 	if _, kept := st.lookup(key, fields["fr"]); kept {
-		t.Error("the superseded variant must be deleted")
+		t.Error("the variant of a resource that is gone must be deleted")
 	}
 	if _, kept := st.lookup(key, fields["en"]); !kept {
 		t.Error("the other variant must be kept")

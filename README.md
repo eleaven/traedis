@@ -251,7 +251,8 @@ the same.
   expired ones are still not cached.
 
 A `HEAD` request is never made conditional. A response with the `ETag` or the `Last-Modified` of the stored one (and its length) refreshes
-it like a `304`; a different one drops a stored response that was still fresh.
+it like a `304`; a different one leaves it as it is: it is the answer to the request of a client, which must not remove what the others
+get (RFC 9111 §4.3.5 only says that the stored response SHOULD be considered stale).
 
 ### Range requests
 
@@ -274,8 +275,9 @@ A stored response that is no longer fresh is served only when allowed, for at mo
 - **`stale-while-revalidate`** ([RFC 5861][rfc5861]): it is served at once and refreshed in the background, with at most one refresh per
   URL and `maxRevalidations` at a time: past it, the refresh is left to a later request. Not for a request with `max-age` or `min-fresh`
   (a browser reload), which waits for the backend. The refresh is the request that got the stale response, with its header fields: a
-  response that may not be stored removes the stored one, but for an error, which keeps it (`5xx`, `429`, or a `4xx` that may only be
-  about that request: its `Authorization`, its cookies…). A `404` or a `410` still removes it: the resource is gone.
+  response that may not be stored leaves the stored one as it is, since it may only be about that request (`private` or `Set-Cookie` for
+  its cookies, an error for its `Authorization`, a body too large for its header fields…). Only a `404` or a `410` removes it: the
+  resource is gone. The same goes for a `304` that may not be stored, or that is about another response.
 - **`stale-if-error`**: it replaces a `500`, `502`, `503` or `504`, including those of Traefik when the backend is unreachable. A request
   with `max-age` or `min-fresh` gets it too, one with `no-cache` does not.
 - **`max-stale`** on the request ([RFC 9111 §5.2.1.2](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1.2)), with
@@ -364,7 +366,8 @@ A shared cache gives the response made for one client to all the others. The def
   or that redirects an anonymous `POST` to its login page, lets any client empty the cache of any URL as often as it wants, and choose when
   it is stored again (with what a header field that `Vary` does not name makes the backend answer). Have the backend refuse the methods it
   does not handle with a `405`, or let only those reach it with the rule of the router, as for a site that is only read:
-  ``Host(`app.example.com`) && (Method(`GET`) || Method(`HEAD`))``.
+  ``Host(`app.example.com`) && (Method(`GET`) || Method(`HEAD`))``. Safe methods remove nothing, but for a `404` or a `410` that the
+  [background refresh](#stale-responses) of a stale response gets.
 - **Cache pollution and cache flooding.** Each URL has its own entry, and the cache cannot know which query parameters the backend ignores:
   `?x=1`, `?x=2`… store the same response again and again, each one up to `maxBodyBytes` and for its freshness plus `staleTtl`. Nothing
   bounds the number of URLs: a client can fill Redis with entries that nobody asks for again (flooding), which then take the place of the

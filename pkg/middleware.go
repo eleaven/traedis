@@ -538,8 +538,10 @@ func await(ctx context.Context, done chan struct{}, timeout time.Duration) {
 // freshenWithHead applies the 200 response to a forwarded HEAD to the stored
 // GET response that could have answered it (§4.3.5): stored, the entry of
 // field, or the one the cache did not read because the request said no-cache.
-// The same response gets its fields; another one makes it stale, which a
-// fresh entry is made by deleting it. A response with another content coding
+// The same response gets its fields. Another one leaves it as it is: §4.3.5
+// only says that it SHOULD be considered stale, and the HEAD of a client must
+// not evict a fresh entry (with a header field that changes the response of
+// the backend without being in Vary). A response with another content coding
 // is another variant: it says nothing of this one. Neither does a response
 // without validator: some backends answer a HEAD with next to no header, which
 // must not make a stale entry fresh.
@@ -567,10 +569,6 @@ func (c *cache) freshenWithHead(ctx context.Context, r *http.Request, reqCC cach
 		get := r.WithContext(ctx)
 		get.Method = http.MethodGet
 		c.freshen(ctx, get, reqCC, key, field, refreshed(stored, h, m.requestTime, m.responseTime))
-		return
-	}
-	if currentAge(stored, m.responseTime) < freshnessLifetime(stored, c.cfg.defaultTTL) {
-		c.drop(ctx, key, field)
 	}
 }
 
@@ -586,15 +584,13 @@ func resetHeader(h, before http.Header) {
 
 // freshen stores e, the entry of field as a 304 or the response to a HEAD
 // refreshed it (§4.3.4, §4.3.5), in its field: its body stays where it is, for
-// as long. One that may no longer be stored is deleted instead, unless it is
-// only refused because of the request (see supersedes).
+// as long. One that may no longer be stored is left as it was, stale or too
+// old for the request: refused because of the request of a client, it says
+// nothing of the stored one (see gone).
 func (c *cache) freshen(ctx context.Context, req *http.Request, reqCC cacheControl, key, field string, e *entry) {
 	cc := parseCacheControl(e.header.Values("Cache-Control"))
 	ttl, ok := storeTTL(req, reqCC, e, cc, c.cfg)
 	if !ok {
-		if supersedes(e, cc, c.cfg) {
-			c.drop(ctx, key, field)
-		}
 		return
 	}
 	data := encodeEntry(e)
@@ -711,10 +707,10 @@ type missHook struct {
 	age          time.Duration
 	lifetime     time.Duration
 
-	// Background revalidation: superseded is set when the entry must not
-	// outlive a response that ends up not being stored.
+	// Background revalidation: gone is set when the response says that the
+	// resource is gone (see gone), which deletes the entry unless it is stored.
 	revalidation bool
-	superseded   bool
+	gone         bool
 }
 
 func (m *missHook) beforeHeader(code int, h http.Header) disposition {
@@ -738,9 +734,9 @@ func (m *missHook) beforeHeader(code int, h http.Header) disposition {
 			}
 		}
 		// Not the stored response, or its body is gone (or has no room in
-		// memory): in the background, it is deleted.
+		// memory). In the background, the entry is left as it is: the next
+		// request validates it again.
 		m.unusable = true
-		m.superseded = m.revalidation
 		return withhold
 	}
 	if m.stored != nil && !m.revalidation && staleIfErrorStatus(code) {
@@ -765,10 +761,9 @@ func (m *missHook) beforeHeader(code int, h http.Header) disposition {
 			e.vary = m.variant.selected
 			m.entry = e
 		}
-		if m.revalidation {
-			// A storable response whose body turns out to be too large supersedes too.
-			m.superseded = m.store || supersedes(e, cc, m.c.cfg)
-		}
+	}
+	if m.revalidation {
+		m.gone = gone(code)
 	}
 	if m.head && code == http.StatusOK {
 		m.headHeader = h.Clone()

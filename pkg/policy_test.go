@@ -419,38 +419,19 @@ func TestServableOnError(t *testing.T) {
 	}
 }
 
-func TestSupersedes(t *testing.T) {
-	tests := []struct {
-		name   string
-		status int
-		header http.Header
-		want   bool
-	}{
-		{name: "status not in statusCodes", status: 404, header: http.Header{"Cache-Control": {"max-age=60"}}, want: true},
-		{name: "resource gone", status: 410, header: http.Header{}, want: true},
-		{name: "request rejected: credentials", status: 401, header: http.Header{}},
-		{name: "request rejected: forbidden", status: 403, header: http.Header{"Cache-Control": {"no-store"}}},
-		{name: "request rejected: malformed", status: 400, header: http.Header{}},
-		{name: "request rejected: header fields too large", status: 431, header: http.Header{}},
-		{name: "§5.2.2.5 no-store", status: 200, header: http.Header{"Cache-Control": {"no-store"}}, want: true},
-		{name: "§5.2.2.7 private", status: 200, header: http.Header{"Cache-Control": {"private, max-age=60"}}, want: true},
-		{name: "already stale on arrival", status: 200, header: http.Header{"Cache-Control": {"max-age=60"}, "Age": {"60"}}, want: true},
-		{name: "§4.1 Vary: *", status: 200, header: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"*"}}, want: true},
-		{name: "backend error", status: 503, header: http.Header{}},
-		{name: "any 5xx", status: 507, header: http.Header{}},
-		{name: "backend throttling", status: 429, header: http.Header{}},
-		{name: "storable for a request without credentials: explicit freshness", status: 200, header: http.Header{"Cache-Control": {"max-age=60"}}},
-		{name: "storable for a request without credentials: defaultTtl", status: 200, header: http.Header{}},
-		{name: "storable as another variant", status: 200, header: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"Accept-Language"}}},
+func TestGone(t *testing.T) {
+	for _, status := range []int{404, 410} {
+		if !gone(status) {
+			t.Errorf("gone(%d) = false: the resource is gone", status)
+		}
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			cc := parseCacheControl(tt.header.Values("Cache-Control"))
-			e := &entry{status: tt.status, header: tt.header, requestTime: t0, responseTime: t0}
-			if got := supersedes(e, cc, testSettings()); got != tt.want {
-				t.Errorf("supersedes() = %v, want %v", got, tt.want)
-			}
-		})
+	// The response to the request of a client that may not be stored says
+	// nothing of the stored one: rejected credentials, an error, throttling,
+	// or a 200 that is private, no-store, with Set-Cookie…
+	for _, status := range []int{200, 301, 400, 401, 403, 429, 431, 500, 503, 507} {
+		if gone(status) {
+			t.Errorf("gone(%d) = true", status)
+		}
 	}
 }
 

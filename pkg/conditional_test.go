@@ -634,12 +634,12 @@ func TestValidationOutcome(t *testing.T) {
 			wantCode: 200, wantBody: "hello", wantStatus: "traedis; fwd=stale; fwd-status=200", wantCalls: 2, wantStored: "hello", wantSets: 2,
 		},
 		{
-			name: "§5.2.2.5 304 with no-store: served, then deleted", origin: func(o *origin) { o.cacheControl = "no-store" },
-			wantCode: 200, wantBody: "old", wantStatus: validated, wantCalls: 1, wantSent: `"v1"`, wantSets: 1,
+			name: "§5.2.2.5 304 with no-store: served, left as it was", origin: func(o *origin) { o.cacheControl = "no-store" },
+			wantCode: 200, wantBody: "old", wantStatus: validated, wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 1,
 		},
 		{
-			name: "304 that leaves the response stale: served, then deleted", origin: func(o *origin) { o.cacheControl = "max-age=0" },
-			wantCode: 200, wantBody: "old", wantStatus: validated, wantCalls: 1, wantSent: `"v1"`, wantSets: 1,
+			name: "304 that leaves the response stale: served, left as it was", origin: func(o *origin) { o.cacheControl = "max-age=0" },
+			wantCode: 200, wantBody: "old", wantStatus: validated, wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 1,
 		},
 		{
 			name: "RFC 5861 §4 backend error", cacheControl: "max-age=60, stale-if-error=300", origin: func(o *origin) { o.status = 503; o.etag = `"v2"`; o.body = "error" },
@@ -727,10 +727,10 @@ func TestValidationWithSetCookie(t *testing.T) {
 	tests := []struct {
 		name         string
 		cacheControl string // of the 304
-		wantStored   bool
+		wantRefresh  bool   // otherwise the entry is left as it was
 	}{
-		{name: `§5.2.2.7 private="Set-Cookie": the entry is refreshed without the cookie`, cacheControl: `max-age=60, private="Set-Cookie"`, wantStored: true},
-		{name: `§5.2.2.4 no-cache="Set-Cookie": the entry is refreshed without the cookie`, cacheControl: `max-age=60, no-cache="Set-Cookie"`, wantStored: true},
+		{name: `§5.2.2.7 private="Set-Cookie": the entry is refreshed without the cookie`, cacheControl: `max-age=60, private="Set-Cookie"`, wantRefresh: true},
+		{name: `§5.2.2.4 no-cache="Set-Cookie": the entry is refreshed without the cookie`, cacheControl: `max-age=60, no-cache="Set-Cookie"`, wantRefresh: true},
 		{name: "§3.1 a response with a cookie that is not excluded may not be stored", cacheControl: "max-age=60"},
 		{name: "public does not make a cookie shareable", cacheControl: "public, max-age=60"},
 	}
@@ -753,14 +753,14 @@ func TestValidationWithSetCookie(t *testing.T) {
 				t.Errorf("Set-Cookie = %q", got)
 			}
 			e := storedAt(t, st, staleURL, "")
-			if (e != nil) != tt.wantStored {
-				t.Fatalf("stored = %v, want %v", e != nil, tt.wantStored)
-			}
 			if e == nil {
-				return
+				t.Fatal("the entry must be kept")
 			}
-			if len(e.header.Values("Set-Cookie")) != 0 || time.Since(e.responseTime) > time.Minute {
-				t.Errorf("stored entry: %v, received %v", e.header, e.responseTime)
+			if len(e.header.Values("Set-Cookie")) != 0 || (time.Since(e.responseTime) < time.Minute) != tt.wantRefresh {
+				t.Errorf("stored entry: %v, received %v; want refreshed = %v", e.header, e.responseTime, tt.wantRefresh)
+			}
+			if !tt.wantRefresh {
+				return
 			}
 			if next := doRequest(c, http.MethodGet, staleURL, nil); next.Header().Get("Set-Cookie") != "" || !isHit(lastCacheStatus(next)) {
 				t.Errorf("a hit must not replay Set-Cookie: %q %q", next.Header().Values("Set-Cookie"), lastCacheStatus(next))
@@ -831,9 +831,9 @@ func TestBackgroundValidation(t *testing.T) {
 	}{
 		{name: "§4.3.3 304 refreshes the entry", wantStored: "old", wantFresh: true, wantSets: 2},
 		{name: "§4.3.3 a whole response replaces it", origin: func(o *origin) { o.etag = `"v2"` }, wantStored: "hello", wantFresh: true, wantSets: 2},
-		{name: "§4.3.4 304 about another response deletes it", origin: func(o *origin) { o.etagOf304 = `"v2"` }, wantSets: 1},
+		{name: "§4.3.4 304 about another response leaves it as it is", origin: func(o *origin) { o.etagOf304 = `"v2"` }, wantStored: "old", wantSets: 1},
 		{name: "§4.3.4 304 without validator leaves it as it is", origin: func(o *origin) { o.bare304 = true }, wantStored: "old", wantSets: 1},
-		{name: "§5.2.2.5 304 with no-store deletes it", origin: func(o *origin) { o.cacheControl = "no-store" }, wantSets: 1},
+		{name: "§5.2.2.5 304 with no-store leaves it as it is", origin: func(o *origin) { o.cacheControl = "no-store" }, wantStored: "old", wantSets: 1},
 		{name: "RFC 5861 §4 backend error keeps it", origin: func(o *origin) { o.status = 503; o.etag = `"v2"` }, wantStored: "old", wantSets: 1},
 	}
 	for _, tt := range tests {
@@ -884,15 +884,15 @@ func TestHeadFreshensStoredResponse(t *testing.T) {
 		{name: "same response, stale entry: refreshed", cacheControl: "max-age=60", wantStored: true, wantFresh: true, wantSets: 2},
 		{name: "same response, fresh entry refused by the request: refreshed", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, wantStored: true, wantFresh: true, wantSets: 2},
 		{name: "same response, request no-cache: refreshed", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"no-cache"}}, wantStored: true, wantFresh: true, wantSets: 2},
-		{name: "another entity tag, fresh entry: invalidated", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.etag = `"v2"` }, wantSets: 1, wantDels: 1},
-		{name: "another entity tag, request no-cache: invalidated", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"no-cache"}}, origin: func(o *origin) { o.etag = `"v2"` }, wantSets: 1, wantDels: 1},
-		{name: "another length: invalidated", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.body = "longer" }, wantSets: 1, wantDels: 1},
+		{name: "another entity tag, fresh entry: a client cannot evict it", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.etag = `"v2"` }, wantStored: true, wantSets: 1},
+		{name: "another entity tag, request no-cache: a client cannot evict it", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"no-cache"}}, origin: func(o *origin) { o.etag = `"v2"` }, wantStored: true, wantSets: 1},
+		{name: "another length: a client cannot evict it", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.body = "longer" }, wantStored: true, wantSets: 1},
 		{name: "no validator: nothing is known of the stored response", cacheControl: "max-age=60", origin: func(o *origin) { o.etag = ""; o.lastModified = "" }, wantStored: true, wantSets: 1},
-		{name: "no validator but another length: invalidated", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.etag = ""; o.lastModified = ""; o.body = "longer" }, wantSets: 1, wantDels: 1},
+		{name: "no validator but another length: a client cannot evict it", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.etag = ""; o.lastModified = ""; o.body = "longer" }, wantStored: true, wantSets: 1},
 		{name: "another entity tag, stale entry: it is stale already", cacheControl: "max-age=60", origin: func(o *origin) { o.etag = `"v2"` }, wantStored: true, wantSets: 1},
 		{name: "another content coding is another variant", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.etag = `"v2"`; o.extra = http.Header{"Content-Encoding": {"gzip"}} }, wantStored: true, wantSets: 1},
 		{name: "not a 200", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.status = 404; o.etag = `"v2"` }, wantStored: true, wantSets: 1},
-		{name: "same response that may no longer be stored: deleted", cacheControl: "max-age=60", origin: func(o *origin) { o.cacheControl = "no-store" }, wantSets: 1, wantDels: 1},
+		{name: "same response that may no longer be stored: left as it was", cacheControl: "max-age=60", origin: func(o *origin) { o.cacheControl = "no-store" }, wantStored: true, wantSets: 1},
 		{name: "§5.2.1.5 request no-store: not stored again", cacheControl: "max-age=60", reqHdr: http.Header{"Cache-Control": {"no-store"}}, wantStored: true, wantSets: 1},
 	}
 	for _, tt := range tests {

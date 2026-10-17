@@ -143,6 +143,7 @@ http:
           redis:
             dsn: "redis://cache:6379/2"
           ignoreClientCacheControl: false # on by default: request directives are advisory (RFC 9111 §5.2.1)
+          maxBodyBytes: 2048 # 2 KiB: whoami echoes the request headers, large ones make a response too large to be stored
     whoami-auth:
       basicAuth:
         users:

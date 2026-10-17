@@ -47,9 +47,9 @@ func (c *cache) revalidate(r *http.Request, key, field string, e *entry) {
 
 // refresh runs a background revalidation: a GET with the validators of the
 // entry, if it has some (§4.3.1). A 304 refreshes the entry, any other response
-// replaces it. A response that is not stored but supersedes the entry deletes
-// it; a backend error leaves it in place, to be served stale for as long as it
-// is allowed.
+// replaces it. A 404 or a 410 that is not stored deletes it; any other
+// response leaves it in place, to be served stale for as long as it is allowed
+// (see gone).
 func (c *cache) refresh(req *http.Request, key, field string, e *entry) {
 	defer c.revalidated(key)
 	ctx, cancel := context.WithTimeout(req.Context(), c.cfg.revalidationTimeout)
@@ -76,7 +76,7 @@ func (c *cache) refresh(req *http.Request, key, field string, e *entry) {
 	}
 	if fields, ok := c.toStore(rec, m); ok {
 		c.put(ctx, key, m.variant, fields, m.ttl)
-	} else if m.superseded {
+	} else if m.gone {
 		c.drop(ctx, key, field)
 	}
 }
