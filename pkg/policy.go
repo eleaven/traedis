@@ -332,8 +332,10 @@ func storeTTL(req *http.Request, reqCC cacheControl, e *entry, cc cacheControl, 
 	// §3.5: a response to an authenticated request is not shared unless it
 	// says it may be. authorizationHeaders tell who the client is too, when a
 	// middleware before the cache replaced Authorization with them (basicAuth,
-	// forwardAuth) or when the backend reads an API key there.
-	hasAuth := req.Header.Get("Authorization") != "" || hasAuthorization(req.Header, cfg.authorizationHeaders)
+	// forwardAuth) or when the backend reads an API key there. Any line of
+	// these fields counts, not only the first: a client must not hide its
+	// credentials behind an empty one, which the backend may skip.
+	hasAuth := hasHeaderValue(req.Header, "Authorization") || hasAuthorization(req.Header, cfg.authorizationHeaders)
 	if hasAuth && !cc.public && cc.sMaxAge < 0 && !cc.mustRevalidate {
 		return 0, false
 	}
@@ -358,7 +360,7 @@ func storeTTL(req *http.Request, reqCC cacheControl, e *entry, cc cacheControl, 
 	if lifetime < 0 {
 		// defaultTtl is heuristic freshness: never for personalized exchanges.
 		if !heuristicallyCacheable(status) || cfg.defaultTTL <= 0 ||
-			hasAuth || req.Header.Get("Cookie") != "" || hasSetCookie {
+			hasAuth || hasHeaderValue(req.Header, "Cookie") || hasSetCookie {
 			return 0, false
 		}
 		lifetime = cfg.defaultTTL
@@ -372,10 +374,10 @@ func storeTTL(req *http.Request, reqCC cacheControl, e *entry, cc cacheControl, 
 }
 
 // hasAuthorization reports whether the request header h has one of the
-// authorizationHeaders, with a value.
+// authorizationHeaders, with a value on any of its lines.
 func hasAuthorization(h http.Header, authorizationHeaders []string) bool {
 	for _, name := range authorizationHeaders {
-		if h.Get(name) != "" {
+		if hasHeaderValue(h, name) {
 			return true
 		}
 	}

@@ -47,6 +47,11 @@ deprecated `Pragma` header field is read any more: see the breaking changes befo
   with `removeHeader` replaces it with the header field of `headerField`, and `forwardAuth` adds those of `authResponseHeaders`: such a
   request looked anonymous, and its response without `Cache-Control` was stored for `defaultTtl`. The new `authorizationHeaders` option
   lists these header fields (`[X-WebAuth-User]`), or one with an API key: their requests are treated as those with `Authorization`.
+- **A client could have its own page served to the others.** `defaultTtl` is not applied to a request with a `Cookie`, nor is its response
+  stored without permission when it has `Authorization` or a header field of `authorizationHeaders`, but only the first line of these fields
+  was read: a request whose first `Cookie` line was empty and the second one its session looked anonymous to the cache, not to a backend
+  that reads all of them, and the page that the backend made for its session was stored for `defaultTtl` and served to everyone. A value on
+  any line of these fields now counts.
 - **A `GET` with content could poison the cache.** Its content is not part of the cache key, but some backends read parameters in it: what
   they answered was stored and served to the other clients of the URL. A `GET` or `HEAD` with content (`Content-Length` or
   `Transfer-Encoding`) is now forwarded untouched, with `Cache-Status: traedis; fwd=bypass`: it is not answered from the cache, and its
