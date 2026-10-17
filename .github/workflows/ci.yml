@@ -76,9 +76,8 @@ jobs:
       - if: always()
         run: docker compose down --volumes
 
-  # Benchmarks of the pushed code: in-process under Yaegi, then k6 through Traefik (without and
-  # with the cache). Informational only: shared runners are too noisy to gate on timings, so the
-  # release job does not need it.
+  # Benchmarks of the pushed code: in-process under Yaegi, then k6 through Traefik (without and with the cache). Informational only: shared
+  # runners are too noisy to gate on timings, so the release job does not need it.
   bench:
     runs-on: ubuntu-latest
     steps:
@@ -98,8 +97,8 @@ jobs:
       - if: always()
         run: docker compose down --volumes
 
-  # Is ./VERSION a valid version, and a new one that follows the highest released one, with its section in CHANGELOG.md?
-  # On pull requests too: a version that cannot be released is refused before it is merged
+  # Is ./VERSION a valid version, and a new one that follows the highest released one, with its section in CHANGELOG.md? On pull requests
+  # too: a version that cannot be released is refused before it is merged
   version:
     runs-on: ubuntu-latest
     outputs:
@@ -120,8 +119,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: .github/scripts/release-notes.sh "$VERSION" >/dev/null
 
-  # Release of a new version, on main only and once the tests pass: its tag and its GitHub release. Skipped otherwise,
-  # which tells at a glance whether a push released something
+  # Release of a new version, on main only and once the tests pass: its tag and its GitHub release. Skipped otherwise, which tells at a
+  # glance whether a push released something
   release:
     needs: [ unit, fuzz, e2e, version ]
     if: github.event_name == 'push' && needs.version.outputs.new == 'true'
@@ -134,10 +133,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      # Create the tag and the release, with its notes from CHANGELOG.md and the GitHub CLI of the runner: no
-      # third-party action in the job, which may write to the repository. --generate-notes adds the link to the
-      # comparison with the previous version after the notes. The notes are read on a line of their own, which fails
-      # the step when they cannot be: as an argument of gh, the failure would be ignored
+      # Create the tag and the release, with its notes from CHANGELOG.md and the GitHub CLI of the runner: no third-party action in the job,
+      # which may write to the repository. --generate-notes adds the link to the comparison with the previous version after the notes. The
+      # notes are read on a line of their own, which fails the step when they cannot be: as an argument of gh, the failure would be ignored
       - name: Create the tag and the release
         env:
           GH_TOKEN: ${{ github.token }}
