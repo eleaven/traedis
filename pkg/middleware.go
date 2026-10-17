@@ -83,7 +83,14 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if c.cfg.exposeKey {
 		status.key = key
 	}
-	reqCC := parseCacheControl(r.Header.Values("Cache-Control"))
+	// Request directives are advisory (§5.2.1). Honoured, they let any client
+	// replace the stored response with what the backend answers to its own
+	// request (no-cache, max-age, min-fresh), read stale responses (max-stale)
+	// and tell what others requested without a trace (only-if-cached).
+	reqCC := parseCacheControl(nil)
+	if !c.cfg.ignoreClientCacheControl {
+		reqCC = parseCacheControl(r.Header.Values("Cache-Control"))
+	}
 
 	if !lookupAllowed(reqCC) {
 		status.fwd = "request"

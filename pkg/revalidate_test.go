@@ -158,7 +158,12 @@ func TestNotServedWhileRevalidating(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := cacheableBackend()
-			c, st := newTestCache(t, b, tt.mutate)
+			c, st := newTestCache(t, b, func(cfg *Config) {
+				honourClientCacheControl(cfg)
+				if tt.mutate != nil {
+					tt.mutate(cfg)
+				}
+			})
 			storeAged(t, st, tt.cacheControl, tt.age)
 			rec := doRequest(c, http.MethodGet, staleURL, tt.reqHdr)
 			if b.calls != 1 || rec.Body.String() != "hello" {

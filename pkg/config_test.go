@@ -31,6 +31,9 @@ func TestCreateConfigDefaults(t *testing.T) {
 	if s.maxRevalidations != 10 || s.revalidationTimeout != 30*time.Second {
 		t.Errorf("maxRevalidations = %d, revalidationTimeout = %v", s.maxRevalidations, s.revalidationTimeout)
 	}
+	if !s.ignoreClientCacheControl {
+		t.Errorf("ignoreClientCacheControl = %v", s.ignoreClientCacheControl)
+	}
 	if s.maxBodyBytes != 5242880 || s.maxBufferedBytes != 64<<20 || s.maxVariants != 16 || s.sortQuery || s.exposeKey {
 		t.Errorf("settings = %+v", s)
 	}
@@ -257,6 +260,7 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.MaxRevalidations = 10
 	cfg.RevalidationTimeout = "30s"
 	cfg.SortQuery = false
+	cfg.IgnoreClientCacheControl = true
 	cfg.ExposeKey = false
 
 	if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "cache"); err != nil {

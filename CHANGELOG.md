@@ -5,14 +5,20 @@ What each release changes for those who use the plugin, the latest first. The se
 
 ## v0.3.0
 
-Security fixes, and a cache that stores more by default. Clients can no longer poison the cache with the content of a `GET`, remove a stored
-response through its background refresh, nor make Traefik hold as much memory as they want. Redirections are now stored by default,
-`statusCodes` takes ranges, and the deprecated `Pragma` header field is no longer read: see the breaking changes before upgrading.
+Security fixes, and a cache that stores more by default. Clients can no longer poison the cache with the content of a `GET`, replace a
+stored response with what the backend answers to their own request, remove one through its background refresh, nor make Traefik hold as much
+memory as they want. Redirections are now stored by default, `statusCodes` takes ranges, and neither the `Cache-Control` of requests nor the
+deprecated `Pragma` header field is read any more: see the breaking changes before upgrading.
 
 ### ⚠️ Breaking changes
 
+- **The `Cache-Control` of requests is ignored by default**: `no-cache`, `max-age` and `min-fresh` no longer make the cache forward a
+  request, `max-stale` no longer gets a stale response, `only-if-cached` no longer gets a `504`, and `no-store` no longer keeps a response
+  from being stored. RFC 9111 makes these directives advisory (§5.2.1); followed, they let any client replace a stored response whenever it
+  wants (see the security fixes). The new `ignoreClientCacheControl` option set to `false` follows them as before.
 - **`Pragma: no-cache` no longer bypasses the cache**: a request with it and without `Cache-Control` is now answered from the cache like any
-  other. A client that must reach the backend sends `Cache-Control: no-cache`. RFC 9111 deprecates `Pragma` (§5.4).
+  other. A client that must reach the backend sends `Cache-Control: no-cache`, which the cache follows with
+  `ignoreClientCacheControl: false`. RFC 9111 deprecates `Pragma` (§5.4).
 - **Redirections are stored by default**: `statusCodes` is now `["200-399"]` (it was `[200]`), so that the cache keeps what the backend
   allows but its errors. A `301` or a `308` is stored for `defaultTtl` even without `Cache-Control`; a `302`, `303` or `307` only with
   explicit freshness. A backend that sends the same `Cache-Control: public` on all its responses, its redirection to its login page
@@ -28,6 +34,11 @@ response through its background refresh, nor make Traefik hold as much memory as
 
 ### Security
 
+- **Any client could replace a stored response with what the backend answers to its own request.** `Cache-Control: no-cache`, `max-age=0`
+  or `min-fresh` made the cache forward the request, and store its response for everyone: with a header field that the backend reads but
+  that its `Vary` does not name, a client could poison the cache whenever it wanted, without waiting for the stored response to expire. The
+  `Cache-Control` of requests is now ignored, unless the new `ignoreClientCacheControl` option is `false`. Clients can no longer read stale
+  responses with `max-stale` either, nor tell whether a URL is stored without storing it with `only-if-cached`.
 - **A `GET` with content could poison the cache.** Its content is not part of the cache key, but some backends read parameters in it: what
   they answered was stored and served to the other clients of the URL. A `GET` or `HEAD` with content (`Content-Length` or
   `Transfer-Encoding`) is now forwarded untouched, with `Cache-Status: traedis; fwd=bypass`: it is not answered from the cache, and its

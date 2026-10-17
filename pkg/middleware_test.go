@@ -52,6 +52,12 @@ func newTestCache(t *testing.T, b http.Handler, mutate func(*Config)) (*cache, *
 	return newCache(b, "cache", s, st), st
 }
 
+// honourClientCacheControl makes newTestCache act on the Cache-Control of
+// requests, for the tests of request directives (§5.2.1).
+func honourClientCacheControl(cfg *Config) {
+	cfg.IgnoreClientCacheControl = false
+}
+
 // cacheKey returns the Redis key of a URI for the cache of newTestCache.
 func cacheKey(uri string) string {
 	return redisKey("cache", uri)
@@ -262,7 +268,7 @@ func TestRequestDirectives(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := cacheableBackend()
-			c, _ := newTestCache(t, b, nil)
+			c, _ := newTestCache(t, b, honourClientCacheControl)
 			doRequest(c, http.MethodGet, testURL, nil)
 			rec := doRequest(c, http.MethodGet, testURL, tt.header)
 			if b.calls != tt.wantCalls || rec.Code != tt.wantCode {
@@ -273,6 +279,51 @@ func TestRequestDirectives(t *testing.T) {
 			}
 		})
 	}
+}
+
+// By default, the Cache-Control of requests is ignored (§5.2.1: request
+// directives are advisory): a client can neither replace the stored response
+// with the answer to its own request, nor read a stale one, nor tell whether
+// a URL is stored without storing it.
+func TestClientCacheControlIgnored(t *testing.T) {
+	for _, directive := range []string{"no-cache", "max-age=0", "min-fresh=3600", "only-if-cached", "no-store"} {
+		t.Run(directive+" on a stored response", func(t *testing.T) {
+			b := cacheableBackend()
+			c, st := newTestCache(t, b, nil)
+			doRequest(c, http.MethodGet, testURL, nil)
+			rec := doRequest(c, http.MethodGet, testURL, http.Header{"Cache-Control": {directive}})
+			if b.calls != 1 || rec.Code != 200 || !strings.HasPrefix(lastCacheStatus(rec), "traedis; hit") || st.sets != 1 {
+				t.Errorf("backend calls = %d, sets = %d, got %d %q: the stored response must answer", b.calls, st.sets, rec.Code, lastCacheStatus(rec))
+			}
+		})
+	}
+	for _, directive := range []string{"only-if-cached", "no-store"} {
+		t.Run(directive+" on a miss", func(t *testing.T) {
+			b := cacheableBackend()
+			c, st := newTestCache(t, b, nil)
+			rec := doRequest(c, http.MethodGet, testURL, http.Header{"Cache-Control": {directive}})
+			if b.calls != 1 || rec.Code != 200 || lastCacheStatus(rec) != "traedis; fwd=uri-miss; fwd-status=200" || st.sets != 1 {
+				t.Errorf("backend calls = %d, sets = %d, got %d %q: forwarded and stored", b.calls, st.sets, rec.Code, lastCacheStatus(rec))
+			}
+		})
+	}
+	t.Run("max-stale on a stale response", func(t *testing.T) {
+		b := cacheableBackend()
+		c, st := newTestCache(t, b, nil)
+		storeAged(t, st, "max-age=60", 70*time.Second)
+		rec := doRequest(c, http.MethodGet, staleURL, http.Header{"Cache-Control": {"max-stale"}})
+		if b.calls != 1 || rec.Body.String() != "hello" || lastCacheStatus(rec) != "traedis; fwd=stale; fwd-status=200" {
+			t.Errorf("backend calls = %d, got %q %q: a stale response is not served", b.calls, rec.Body.String(), lastCacheStatus(rec))
+		}
+	})
+	t.Run("the request reaches the backend as it is", func(t *testing.T) {
+		b := cacheableBackend()
+		c, _ := newTestCache(t, b, nil)
+		doRequest(c, http.MethodGet, testURL, http.Header{"Cache-Control": {"no-cache"}})
+		if got := b.lastReq.Header.Get("Cache-Control"); got != "no-cache" {
+			t.Errorf("Cache-Control sent = %q", got)
+		}
+	})
 }
 
 func TestMaxStale(t *testing.T) {
@@ -306,7 +357,12 @@ func TestMaxStale(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := cacheableBackend()
-			c, st := newTestCache(t, b, tt.mutate)
+			c, st := newTestCache(t, b, func(cfg *Config) {
+				honourClientCacheControl(cfg)
+				if tt.mutate != nil {
+					tt.mutate(cfg)
+				}
+			})
 			storeAged(t, st, tt.cacheControl, tt.age)
 			method := tt.method
 			if method == "" {
@@ -362,7 +418,7 @@ func TestMaxStaleWithStaleWhileRevalidate(t *testing.T) {
 
 func TestOnlyIfCachedMissIs504(t *testing.T) {
 	b := cacheableBackend()
-	c, _ := newTestCache(t, b, nil)
+	c, _ := newTestCache(t, b, honourClientCacheControl)
 	rec := doRequest(c, http.MethodGet, testURL, http.Header{"Cache-Control": {"only-if-cached"}})
 	if rec.Code != http.StatusGatewayTimeout || b.calls != 0 {
 		t.Errorf("§5.2.1.7 got %d with %d backend calls, want 504 and none", rec.Code, b.calls)
@@ -465,7 +521,12 @@ func TestStaleIfError(t *testing.T) {
 				header: http.Header{"Content-Type": {"text/html"}, "Retry-After": {"120"}, "Cache-Status": {"origin; fwd=miss"}},
 				body:   "error",
 			}
-			c, st := newTestCache(t, b, tt.mutate)
+			c, st := newTestCache(t, b, func(cfg *Config) {
+				honourClientCacheControl(cfg)
+				if tt.mutate != nil {
+					tt.mutate(cfg)
+				}
+			})
 			at := time.Now().Add(-tt.age)
 			storeEntry(t, st, "http://example.com/a", &entry{
 				status: 200, header: http.Header{"Cache-Control": {tt.cacheControl}, "Content-Type": {"text/plain"}}, body: []byte("old"),

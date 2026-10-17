@@ -34,6 +34,7 @@ type Config struct {
 	MaxRevalidations            int         `json:"maxRevalidations,omitempty"`
 	RevalidationTimeout         string      `json:"revalidationTimeout,omitempty"`
 	SortQuery                   bool        `json:"sortQuery,omitempty"`
+	IgnoreClientCacheControl    bool        `json:"ignoreClientCacheControl,omitempty"`
 	ExposeKey                   bool        `json:"exposeKey,omitempty"`
 }
 
@@ -79,6 +80,7 @@ func CreateConfig() *Config {
 		MaxRevalidations:            10,
 		RevalidationTimeout:         "30s",
 		SortQuery:                   false,
+		IgnoreClientCacheControl:    true,
 		ExposeKey:                   false,
 	}
 }
@@ -105,7 +107,10 @@ type settings struct {
 	// sortQuery makes the order of the query parameters irrelevant to the
 	// cache key (see cacheURI).
 	sortQuery bool
-	exposeKey bool
+	// ignoreClientCacheControl makes the cache act as if requests had no
+	// Cache-Control (see ServeHTTP).
+	ignoreClientCacheControl bool
+	exposeKey                bool
 }
 
 // redisOptions describes how to reach Redis. It holds credentials: never log it.
@@ -227,6 +232,7 @@ func parseConfig(cfg *Config) (settings, error) {
 	}
 
 	s.sortQuery = cfg.SortQuery
+	s.ignoreClientCacheControl = cfg.IgnoreClientCacheControl
 	s.exposeKey = cfg.ExposeKey
 
 	return s, nil

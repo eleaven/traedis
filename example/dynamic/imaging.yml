@@ -12,7 +12,7 @@ http:
     imaging-validate:
       rule: PathPrefix(`/imaging-validate`)
       middlewares:
-        - imaging-cache
+        - imaging-client # acts on the Cache-Control of clients: e2e/tests/request.hurl asks for stale responses
         - imaging-validate-headers # after the cache: for the cache, this header comes from the backend
         - imaging-prefix
       service: imaging
@@ -47,6 +47,13 @@ http:
         traedis:
           redis:
             dsn: "redis://cache:6379/0"
+
+    imaging-client:
+      plugin:
+        traedis:
+          redis:
+            dsn: "redis://cache:6379/0"
+          ignoreClientCacheControl: false # on by default: request directives are advisory (RFC 9111 §5.2.1)
 
     imaging-cache-errors:
       plugin:

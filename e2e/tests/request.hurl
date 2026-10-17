@@ -1,57 +1,82 @@
 # Request directives (RFC 9111 §5.2.1).
 
-# no-store (§5.2.1.5): the response is not stored
-GET {{base_url}}/whoami-cache?run={{run}}
-Cache-Control: no-store
+# By default, the cache ignores them: they are advisory (§5.2.1). A client can neither replace the stored response with
+# what the backend answers to its own request, nor get a stale one, nor tell whether a URL is stored without storing it
+
+# only-if-cached: forwarded and stored as any request
+GET {{base_url}}/whoami-cache?ignored={{run}}
+Cache-Control: only-if-cached, no-store
 [Options]
 variable: run={{newUuid}}
 HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=200"
 
+# no-cache, max-age=0, min-fresh: the stored response answers
+GET {{base_url}}/whoami-cache?ignored={{run}}
+Cache-Control: no-cache
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; hit; ttl="
+
+GET {{base_url}}/whoami-cache?ignored={{run}}
+Cache-Control: max-age=0, min-fresh=600
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; hit; ttl="
+
+# /whoami-client acts on them (ignoreClientCacheControl: false)
+
+# no-store (§5.2.1.5): the response is not stored
+GET {{base_url}}/whoami-client?run={{run}}
+Cache-Control: no-store
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=200"
+
 # only-if-cached (§5.2.1.7): 504 when nothing is stored
-GET {{base_url}}/whoami-cache?run={{run}}
+GET {{base_url}}/whoami-client?run={{run}}
 Cache-Control: only-if-cached
 HTTP 504
 [Asserts]
 # RFC 9211 §2: a response of the cache's own, to a request that was not forwarded
 header "Cache-Status" not exists
 
-GET {{base_url}}/whoami-cache?run={{run}}
+GET {{base_url}}/whoami-client?run={{run}}
 HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=200"
 
 # only-if-cached (§5.2.1.7): served when stored
-GET {{base_url}}/whoami-cache?run={{run}}
+GET {{base_url}}/whoami-client?run={{run}}
 Cache-Control: only-if-cached
 HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; hit; ttl="
 
 # no-cache (§5.2.1.4): the stored response is not used
-GET {{base_url}}/whoami-cache?run={{run}}
+GET {{base_url}}/whoami-client?run={{run}}
 Cache-Control: no-cache
 HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=request; fwd-status=200"
 
 # max-age=0 (§5.2.1.1): the stored response is fresh, but too old for this client (RFC 9211 §2.2: fwd=request)
-GET {{base_url}}/whoami-cache?run={{run}}
+GET {{base_url}}/whoami-client?run={{run}}
 Cache-Control: max-age=0
 HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=request; fwd-status=200"
 
 # min-fresh (§5.2.1.3) beyond defaultTtl (5m): not fresh for long enough
-GET {{base_url}}/whoami-cache?run={{run}}
+GET {{base_url}}/whoami-client?run={{run}}
 Cache-Control: min-fresh=600
 HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=request; fwd-status=200"
 
 # Without directives, the stored response is still served
-GET {{base_url}}/whoami-cache?run={{run}}
+GET {{base_url}}/whoami-client?run={{run}}
 HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; hit; ttl="

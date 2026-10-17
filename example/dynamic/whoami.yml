@@ -11,7 +11,7 @@ http:
     whoami-stale:
       rule: PathPrefix(`/whoami-stale`)
       middlewares:
-        - whoami-cache
+        - whoami-client # acts on the Cache-Control of clients: e2e/tests/stale.hurl reloads like a browser
         - whoami-stale-headers # after the cache: for the cache, these headers come from the backend
         - whoami-stale-prefix
       service: whoami
@@ -75,6 +75,13 @@ http:
       middlewares:
         - whoami-tls-untrusted
       service: whoami
+    # Request directives: by default the cache ignores the Cache-Control of clients, which this middleware acts on:
+    # `curl -H 'Cache-Control: no-cache' http://localhost:8080/whoami-client` reaches the backend
+    whoami-client:
+      rule: PathPrefix(`/whoami-client`)
+      middlewares:
+        - whoami-client
+      service: whoami
     whoami:
       rule: PathPrefix(`/whoami`)
       service: whoami
@@ -116,6 +123,12 @@ http:
           redis:
             dsn: "redis://cache:6379/2"
           maxBodyBytes: 5120 # 5 KiB
+    whoami-client:
+      plugin:
+        traedis:
+          redis:
+            dsn: "redis://cache:6379/2"
+          ignoreClientCacheControl: false # on by default: request directives are advisory (RFC 9111 §5.2.1)
     whoami-vary:
       plugin:
         traedis:
@@ -160,6 +173,7 @@ http:
           defaultTtl: 2s
           defaultStaleWhileRevalidate: 10s
           defaultStaleIfError: 1m
+          ignoreClientCacheControl: false # e2e/tests/stale.hurl reloads like a browser
 
   services:
     whoami:

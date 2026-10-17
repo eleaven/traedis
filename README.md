@@ -89,6 +89,7 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `maxRevalidations`             | `10`                   | [Background refreshes](#stale-responses) running at once, for each middleware in each Traefik instance.                                        |
 | `revalidationTimeout`          | `30s`                  | Maximum time of a background refresh.                                                                                                          |
 | `sortQuery`                    | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
+| `ignoreClientCacheControl`     | `true`                 | Ignore the `Cache-Control` of requests, whose directives are advisory: see [Sent by the client](#sent-by-the-client).                          |
 | `exposeKey`                    | `false`                | Add the [Redis key](#cacheable-responses) to the `Cache-Status` header (`key="…"`).                                                            |
 
 ## HTTP headers
@@ -122,7 +123,10 @@ The response of the backend says whether it may be stored, for how long, and whe
 
 The request of the client says whether a stored response may answer it.
 
-- `Cache-Control`:
+- `Cache-Control`: ignored by default (`ignoreClientCacheControl`). Its directives are advisory
+  ([RFC 9111 §5.2.1](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1)): followed, they let any client replace the stored response
+  with what the backend answers to its own request, get a stale one, and tell whether a URL is stored without storing it (see
+  [Security](#security)). With `ignoreClientCacheControl: false`:
   - `no-cache`: always forwarded, whatever is stored. The response is stored.
   - `no-store`: the response is not stored. A stored one can still answer.
   - `max-age=N`: refuses a stored response older than `N` seconds.
@@ -150,11 +154,12 @@ Traedis adds these to the responses it sends to the client, and to the requests 
 - `Cache-Status: traedis; …`: on every response, what the cache did ([RFC 9211][rfc9211]):
   - `hit; ttl=N`: served from the cache, fresh for `N` more seconds.
   - `hit; ttl=-N; detail=stale-while-revalidate`: served from the cache, stale by `N` seconds, and refreshed in the background.
-  - `hit; ttl=-N; detail=max-stale`: served from the cache, stale by `N` seconds, as the request allows.
+  - `hit; ttl=-N; detail=max-stale`: served from the cache, stale by `N` seconds, as the request allows (`ignoreClientCacheControl: false`).
   - `fwd=uri-miss`: forwarded, nothing is stored for this URL.
   - `fwd=vary-miss`: forwarded, this URL has [variants](#variants), but none for this request.
   - `fwd=stale`: forwarded, the stored response is stale.
-  - `fwd=request`: forwarded, the request says `no-cache`, or its `max-age` or `min-fresh` refuses a stored response that is still fresh.
+  - `fwd=request`: forwarded, the request says `no-cache`, or its `max-age` or `min-fresh` refuses a stored response that is still fresh
+    (`ignoreClientCacheControl: false`).
   - `fwd=stale; fwd-status=304; ttl=N`: [validated](#conditional-requests) by the backend, the stored response is
     served, fresh for `N` seconds again.
   - `fwd=stale; fwd-status=503; ttl=-N; detail=stale-if-error`: the backend failed, the stored response is served in place of its error.
@@ -270,8 +275,8 @@ A stored response that is no longer fresh is served only when allowed, for at mo
   about that request: its `Authorization`, its cookies…). A `404` or a `410` still removes it: the resource is gone.
 - **`stale-if-error`**: it replaces a `500`, `502`, `503` or `504`, including those of Traefik when the backend is unreachable. A request
   with `max-age` or `min-fresh` gets it too, one with `no-cache` does not.
-- **`max-stale`** on the request ([RFC 9111 §5.2.1.2](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1.2)): it is served as it is,
-  without asking the backend nor refreshing it.
+- **`max-stale`** on the request ([RFC 9111 §5.2.1.2](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1.2)), with
+  `ignoreClientCacheControl: false`: it is served as it is, without asking the backend nor refreshing it.
 
 As [RFC 9111][rfc9111] requires, `must-revalidate`, `proxy-revalidate`, `s-maxage` and `no-cache` forbid all three:
 `max-age=60, stale-while-revalidate=300` is served stale, `s-maxage=60, stale-while-revalidate=300` is not.
@@ -328,13 +333,15 @@ A shared cache gives the response made for one client to all the others. The def
   does the same: `/v1/users` and `/v2/users`, both stripped to `/users`, share their stored responses. Give such routers a cache middleware
   each, and rewrite the URL after it.
 - **What the response depends on must be in `Vary`.** When the backend reads a request header that its `Vary` does not name
-  (`X-Forwarded-Host`, `User-Agent`, `Accept-Language`…), one client chooses what the others get.
+  (`Forwarded`, `X-Original-URL`, `User-Agent`, `Accept-Language`…), one client chooses what the others get. Traefik replaces the
+  `X-Forwarded-*` header fields of the clients it does not trust, but not these. With `ignoreClientCacheControl: false`, it also chooses
+  when: `Cache-Control: no-cache` replaces the stored response with what the backend answers to its request.
 - **Behind a proxy that terminates TLS, Traefik has to trust it.** The scheme of the key is the one of `X-Forwarded-Proto`, which Traefik
   sets to the one of the connection, unless a proxy it trusts sent it: list that proxy in the `forwardedHeaders.trustedIPs` of the entry
   point. Otherwise, `https` requests reach Traefik over `http` like the others and share their stored responses: a redirection of the
   `http` requests to `https` then answers the `https` ones too, which follow it in a loop.
-- **Clients can always reach the backend.** A random query string is a miss, `Cache-Control: no-cache` skips the cache: put a `rateLimit`
-  before it.
+- **Clients can always reach the backend.** A random query string is a miss (and `Cache-Control: no-cache` skips the cache, with
+  `ignoreClientCacheControl: false`): put a `rateLimit` before it.
 - **Bodies are held in memory.** A response is copied in full to be stored, and a stored one is read in full from Redis to be sent: each
   one stays in the memory of Traefik until its client got it all, which a slow client makes last. Past `maxBufferedBytes` for all of them
   (bodies up to 32 KiB are not counted, no more than what Traefik buffers anyway), a response is sent without being stored, and a stored
