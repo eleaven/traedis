@@ -56,7 +56,8 @@ func (h *backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.ServeContent(w, r, "", time.Time{}, bytes.NewReader(h.body))
 }
 
-func newHandler(b *testing.B, next http.Handler, maxBodyBytes int64) http.Handler {
+// newHandler builds the middleware with the default configuration, adjusted by configure.
+func newHandler(b *testing.B, next http.Handler, maxBodyBytes int64, configure ...func(*traedis.Config)) http.Handler {
 	b.Helper()
 	dsn := os.Getenv("TRAEDIS_REDIS_DSN")
 	if dsn == "" {
@@ -69,6 +70,9 @@ func newHandler(b *testing.B, next http.Handler, maxBodyBytes int64) http.Handle
 	cfg.Redis.Timeout = "5s"
 	cfg.StaleTTL = "0s" // entries are gone as soon as they expire
 	cfg.MaxBodyBytes = maxBodyBytes
+	for _, f := range configure {
+		f(cfg)
+	}
 	h, err := traedis.New(context.Background(), next, cfg, "bench")
 	if err != nil {
 		b.Fatal(err)
@@ -178,12 +182,13 @@ func BenchmarkMiss(b *testing.B) {
 	expect(b, serve(h, req, buf), "hit") // it was stored
 }
 
-// BenchmarkStore measures the write path on larger bodies: recording, encoding, HSETEX. The client sends no-cache, so the response is
-// fetched and stored again over the same key: nothing piles up in Redis.
+// BenchmarkStore measures the write path on larger bodies: recording, encoding, HSETEX. The client sends no-cache, honoured here (requests'
+// Cache-Control is ignored by default), so the response is fetched and stored again over the same key: nothing piles up in Redis.
 func BenchmarkStore(b *testing.B) {
+	honourClient := func(cfg *traedis.Config) { cfg.IgnoreClientCacheControl = false }
 	for _, size := range sizes {
 		b.Run(size.name, func(b *testing.B) {
-			h := newHandler(b, &backend{body: make([]byte, size.bytes), cacheControl: longLived}, defaultMaxBody)
+			h := newHandler(b, &backend{body: make([]byte, size.bytes), cacheControl: longLived}, defaultMaxBody, honourClient)
 			path := "/store/" + size.name
 			req := newRequest(http.MethodGet, path)
 			req.Header.Set("Cache-Control", "no-cache")
