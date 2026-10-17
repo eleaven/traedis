@@ -169,9 +169,6 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	c.forward(w, r, key, field, reqCC, status, true, stored)
-	if stored != nil && stored.held > 0 {
-		letGo(c.bodies, stored)
-	}
 }
 
 // find returns the stored response of key selected by the request header h
@@ -358,11 +355,13 @@ func sendsBody(r *http.Request, e *entry) bool {
 // forward proxies the request to the backend and stores the response when
 // allowed. stored is the entry of field that could not be served, if any: the
 // backend is asked whether it is still current (§4.3), and it answers in place
-// of a backend error when stale-if-error allows it (RFC 5861 §4).
+// of a backend error when stale-if-error allows it (RFC 5861 §4). What its
+// body holds of the memory budget is given back once the request is served.
 func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field string, reqCC cacheControl, status cacheStatus, mayStore bool, stored *entry) {
 	if reqCC.onlyIfCached {
 		// §5.2.1.7: no stored response may be used. This response is our own
 		// and the request is not forwarded: no Cache-Status (RFC 9211 §2).
+		letGo(c.bodies, stored)
 		w.WriteHeader(http.StatusGatewayTimeout)
 		return
 	}
@@ -381,6 +380,11 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 	out, validating := backendRequest(r, stored)
 	m.validating = validating
 	rec := newRecorder(w, m, c.cfg.maxBodyBytes, c.bodies)
+	// Deferred: the proxy of Traefik panics (http.ErrAbortHandler) when it
+	// cannot read all the body of the backend, which a client that goes away
+	// causes. What the bodies held would otherwise be lost to the budget for
+	// good, and the cache bypassed once all of it is.
+	defer giveBack(c.bodies, rec, m)
 	c.next.ServeHTTP(rec, out)
 	if !rec.wroteHeader {
 		rec.WriteHeader(http.StatusOK)
@@ -408,9 +412,6 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 		status.fwdStatus = rec.status
 		status.served = true
 		c.serve(w, r, e, currentAge(e, time.Now()), freshnessLifetime(e, c.cfg.defaultTTL), status)
-		if e.held > 0 {
-			letGo(c.bodies, e)
-		}
 		if m.updated {
 			req := r.Clone(context.Background())
 			c.later(key, 0, func(ctx context.Context) { c.freshen(ctx, req, reqCC, key, field, e) })
@@ -435,9 +436,15 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 		rec.held = 0
 		c.later(key, held, func(ctx context.Context) { c.put(ctx, key, m.variant, fields, m.ttl) })
 	}
-	if rec.held > 0 {
-		rec.release()
-	}
+}
+
+// giveBack gives back to b what forward holds of it once the request is
+// served: the copy of the response that was not handed to a write, and the
+// body of the stored response, validated or not.
+func giveBack(b *budget, rec *recorder, m *missHook) {
+	rec.release()
+	letGo(b, m.stored)
+	letGo(b, m.validated)
 }
 
 // later runs write, the store writes that the response to a request for key

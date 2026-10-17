@@ -1,6 +1,7 @@
 package traedis
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -235,6 +236,51 @@ func TestBudgetGivenBack(t *testing.T) {
 			if rec.Body.Len() < len(largeBody) {
 				t.Errorf("body: %d bytes", rec.Body.Len())
 			}
+			checkBudgetEmpty(t, c)
+		})
+	}
+}
+
+// The proxy of Traefik panics with http.ErrAbortHandler when it cannot read all
+// the body of the backend, which a client that goes away causes: what the
+// request held of the budget must be given back all the same. Otherwise a few
+// aborted downloads would hold all of it, and the cache would be bypassed for
+// good.
+func TestBudgetGivenBackOnPanic(t *testing.T) {
+	tests := []struct {
+		name   string
+		length bool // the response has a Content-Length
+		stale  bool // a stale response with a large body is stored
+	}{
+		{name: "copy of known length", length: true},
+		{name: "copy of unknown length"},
+		{name: "stored body waiting for the backend", length: true, stale: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Cache-Control", "max-age=60")
+				if tt.length {
+					w.Header().Set("Content-Length", strconv.Itoa(2*len(largeBody)))
+				}
+				_, _ = w.Write([]byte(largeBody))
+				panic(http.ErrAbortHandler)
+			})
+			c, st := newTestCache(t, b, nil)
+			if tt.stale {
+				at := time.Now().Add(-2 * time.Minute)
+				storeEntry(t, st, testURL, &entry{status: 200, header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"v1"`}},
+					body: []byte(largeBody), requestTime: at, responseTime: at})
+			}
+			func() {
+				defer func() {
+					// Compared by its text: Yaegi wraps what is recovered.
+					if p := recover(); fmt.Sprint(p) != http.ErrAbortHandler.Error() {
+						t.Errorf("panic = %v, want http.ErrAbortHandler", p)
+					}
+				}()
+				c.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, testURL, nil))
+			}()
 			checkBudgetEmpty(t, c)
 		})
 	}
