@@ -5,15 +5,12 @@ import (
 	"time"
 )
 
-// store keeps stored responses in one hash per URI key. A response takes two
-// fields, its entry and its body (see bodyField): one per variant, on top of
-// the marker of the key, when its responses vary.
+// store keeps stored responses in one hash per URI key. A response takes two fields, its entry and its body (see bodyField): one per
+// variant, on top of the marker of the key, when its responses vary.
 type store interface {
-	// get returns the values of fields in key, in the same order: nil for a
-	// field that is not there.
+	// get returns the values of fields in key, in the same order: nil for a field that is not there.
 	get(ctx context.Context, key string, fields []string) ([][]byte, error)
-	// set stores fields in key, at once, all expiring after ttl. With replace,
-	// nothing is stored unless all of them already exist.
+	// set stores fields in key, at once, all expiring after ttl. With replace, nothing is stored unless all of them already exist.
 	set(ctx context.Context, key string, fields []fieldValue, ttl time.Duration, replace bool) error
 	// expire makes field of key expire after ttl, if it is there.
 	expire(ctx context.Context, key, field string, ttl time.Duration) error

@@ -10,8 +10,7 @@ import (
 	"time"
 )
 
-// entryVersion prefixes every stored entry. Bump it on any format change:
-// entries with an unknown version are treated as a miss.
+// entryVersion prefixes every stored entry. Bump it on any format change: entries with an unknown version are treated as a miss.
 const entryVersion = "TRD2"
 
 // entryFixed is the size of an encoded entry without its fields.
@@ -19,8 +18,8 @@ const entryFixed = len(entryVersion) + 2 + 5*8
 
 var errBadEntry = errors.New("invalid cache entry")
 
-// entry is a stored response. Its body is stored apart, in a field of its own
-// (see bodyField): a 304 and the answer to a HEAD are made without reading it.
+// entry is a stored response. Its body is stored apart, in a field of its own (see bodyField): a 304 and the answer to a HEAD are made
+// without reading it.
 //
 // Encoding (big endian):
 //
@@ -28,28 +27,24 @@ var errBadEntry = errors.New("invalid cache entry")
 //	| initialAge i64 | lifetime i64 (nanoseconds) | size u64
 //	| header fields | vary fields
 //
-// where fields are the lines of an HTTP header ("Name: value\r\n") and an
-// empty one. The standard library writes and parses them: under Yaegi, that is
-// many times faster than code of ours.
+// where fields are the lines of an HTTP header ("Name: value\r\n") and an empty one. The standard library writes and parses them: under
+// Yaegi, that is many times faster than code of ours.
 type entry struct {
 	status int
 	header http.Header
-	// body is nil until it is read from the store (see find and ready); size
-	// is its length either way.
+	// body is nil until it is read from the store (see find and ready); size is its length either way.
 	body         []byte
 	size         int64
 	requestTime  time.Time
 	responseTime time.Time
-	// Worked out once, when the response is received (see setFreshness), rather
-	// than on every hit: initialAge is its corrected initial age (§4.2.3) and
-	// lifetime its explicit freshness lifetime (§4.2.1), -1 without one.
+	// Worked out once, when the response is received (see setFreshness), rather than on every hit: initialAge is its corrected initial age
+	// (§4.2.3) and lifetime its explicit freshness lifetime (§4.2.1), -1 without one.
 	initialAge time.Duration
 	lifetime   time.Duration
-	// vary holds the request header values selected by the response Vary; for
-	// Accept-Encoding, the content codings the request accepted (see vary.go).
+	// vary holds the request header values selected by the response Vary; for Accept-Encoding, the content codings the request accepted
+	// (see vary.go).
 	vary http.Header
-	// raw is the entry as it was read from the store, if it was: what tells
-	// whether a body read later is still its own (see ready).
+	// raw is the entry as it was read from the store, if it was: what tells whether a body read later is still its own (see ready).
 	raw []byte
 	// held is what its body holds of the memory budget (see holdBody).
 	held int64
@@ -80,8 +75,8 @@ func encodeEntry(e *entry) []byte {
 	return b.Bytes()
 }
 
-// decodeEntry parses an entry, without its body. Stored data is untrusted: any
-// inconsistency is an error, and so is a body larger than maxBody.
+// decodeEntry parses an entry, without its body. Stored data is untrusted: any inconsistency is an error, and so is a body larger than
+// maxBody.
 func decodeEntry(b []byte, maxBody int64) (*entry, error) {
 	if len(b) > entryOverhead || len(b) < entryFixed || string(b[:len(entryVersion)]) != entryVersion {
 		return nil, errBadEntry

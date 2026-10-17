@@ -7,19 +7,15 @@ import (
 	"time"
 )
 
-// Conditional requests (RFC 9110 §13, RFC 9111 §4.3). The cache only evaluates
-// the conditions of a client against a response it has stored (§4.3.2):
-// without one, they reach the backend as they are (RFC 9110 §13.2.1). When it
-// has a stored response to validate, it sends the backend its validators
-// instead (§4.3.1).
+// Conditional requests (RFC 9110 §13, RFC 9111 §4.3). The cache only evaluates the conditions of a client against a response it has stored
+// (§4.3.2): without one, they reach the backend as they are (RFC 9110 §13.2.1). When it has a stored response to validate, it sends the
+// backend its validators instead (§4.3.1).
 
-// conditions lists the request header fields the cache evaluates. If-Match and
-// If-Unmodified-Since are for the backend, and If-Range goes with Range (see
-// serveRange).
+// conditions lists the request header fields the cache evaluates. If-Match and If-Unmodified-Since are for the backend, and If-Range goes
+// with Range (see serveRange).
 var conditions = []string{"If-None-Match", "If-Modified-Since"}
 
-// conditional reports whether a request has conditions that the cache
-// evaluates: its answer may be a 304.
+// conditional reports whether a request has conditions that the cache evaluates: its answer may be a 304.
 func conditional(h http.Header) bool {
 	for _, name := range conditions {
 		if len(h.Values(name)) > 0 {
@@ -29,12 +25,10 @@ func conditional(h http.Header) bool {
 	return false
 }
 
-// notModified reports whether a stored 200 response with header resp, received
-// at the given time, is the one the client says it has: the answer to the
-// request header req is then a 304 (RFC 9110 §13.1, RFC 9111 §4.3.2).
-// If-None-Match alone decides when it is there; If-Modified-Since is compared
-// with Last-Modified, or with when the response was generated or received, and
-// ignored unless it is one valid date (RFC 9110 §13.1.3).
+// notModified reports whether a stored 200 response with header resp, received at the given time, is the one the client says it has: the
+// answer to the request header req is then a 304 (RFC 9110 §13.1, RFC 9111 §4.3.2). If-None-Match alone decides when it is there;
+// If-Modified-Since is compared with Last-Modified, or with when the response was generated or received, and ignored unless it is one valid
+// date (RFC 9110 §13.1.3).
 func notModified(req, resp http.Header, received time.Time) bool {
 	if tags := req.Values("If-None-Match"); len(tags) > 0 {
 		return etagListed(tags, resp.Get("ETag"))
@@ -54,8 +48,8 @@ func notModified(req, resp http.Header, received time.Time) bool {
 	return !modified.After(since)
 }
 
-// etagListed reports whether etag is one of the entity tags of If-None-Match
-// field lines, by weak comparison (RFC 9110 §8.8.3.2). "*" is any response.
+// etagListed reports whether etag is one of the entity tags of If-None-Match field lines, by weak comparison (RFC 9110 §8.8.3.2). "*" is
+// any response.
 func etagListed(lines []string, etag string) bool {
 	for _, line := range lines {
 		for _, tag := range splitList(line) {
@@ -72,16 +66,14 @@ func sameETag(a, b string) bool {
 	return strings.TrimPrefix(a, "W/") == strings.TrimPrefix(b, "W/")
 }
 
-// representationMetadata lists the fields describing a representation
-// (RFC 9110 §8) that a 304 does not carry: Content-Location and the validators
-// are the ones it keeps.
+// representationMetadata lists the fields describing a representation (RFC 9110 §8) that a 304 does not carry: Content-Location and the
+// validators are the ones it keeps.
 var representationMetadata = []string{
 	"Content-Type", "Content-Encoding", "Content-Language", "Content-Length", "Content-Range",
 }
 
-// notModifiedHeader makes h, the header of a stored response, the header of
-// the 304 sent in its place (RFC 9110 §15.4.5): without representation
-// metadata, but for Last-Modified when it is the only validator.
+// notModifiedHeader makes h, the header of a stored response, the header of the 304 sent in its place (RFC 9110 §15.4.5): without
+// representation metadata, but for Last-Modified when it is the only validator.
 func notModifiedHeader(h http.Header) {
 	for _, name := range representationMetadata {
 		h.Del(name)
@@ -91,13 +83,10 @@ func notModifiedHeader(h http.Header) {
 	}
 }
 
-// backendRequest returns the request the backend gets for r when e is the
-// stored response that could not be served: the validators of e in place of
-// the conditions of the client (§4.3.1), which the cache answers from e once
-// it is validated. validating tells whether that is so: a 304 is then about e.
-// Otherwise it is r itself: without a stored response of its own to validate
-// (none, no validator, a HEAD), the cache leaves the conditions to the backend
-// (§4.3.2). r is never modified.
+// backendRequest returns the request the backend gets for r when e is the stored response that could not be served: the validators of e in
+// place of the conditions of the client (§4.3.1), which the cache answers from e once it is validated. validating tells whether that is so:
+// a 304 is then about e. Otherwise it is r itself: without a stored response of its own to validate (none, no validator, a HEAD), the cache
+// leaves the conditions to the backend (§4.3.2). r is never modified.
 func backendRequest(r *http.Request, e *entry) (*http.Request, bool) {
 	etag, modified := "", ""
 	if e != nil && r.Method == http.MethodGet {
@@ -120,18 +109,13 @@ func backendRequest(r *http.Request, e *entry) (*http.Request, bool) {
 	return out, true
 }
 
-// validates tells what a 304 with header h says of e, the stored response that
-// was validated (§4.3.4). current: e is the response the 304 is about, and may
-// be reused. update: e gets the fields of the 304, which takes a validator
-// that identifies it:
+// validates tells what a 304 with header h says of e, the stored response that was validated (§4.3.4). current: e is the response the 304
+// is about, and may be reused. update: e gets the fields of the 304, which takes a validator that identifies it:
 //   - a strong entity tag has to be the one of e;
-//   - otherwise, a weak entity tag and Last-Modified have to correspond to
-//     those of e;
-//   - a 304 without validator only updates a response without validator: e
-//     has some, it is reused as it is.
+//   - otherwise, a weak entity tag and Last-Modified have to correspond to those of e;
+//   - a 304 without validator only updates a response without validator: e has some, it is reused as it is.
 //
-// A validator that is not the one of e is about another response: e is not
-// current.
+// A validator that is not the one of e is about another response: e is not current.
 func validates(e *entry, h http.Header) (bool, bool) {
 	etag := h.Get("ETag")
 	modified := h.Get("Last-Modified")
@@ -152,9 +136,8 @@ func validates(e *entry, h http.Header) (bool, bool) {
 	return true, true
 }
 
-// headMatches reports whether the 200 response to a HEAD with header h is the
-// stored response e (§4.3.5): the validators it has are those of e, and its
-// Content-Length is the length of the body of e.
+// headMatches reports whether the 200 response to a HEAD with header h is the stored response e (§4.3.5): the validators it has are those
+// of e, and its Content-Length is the length of the body of e.
 func headMatches(e *entry, h http.Header) bool {
 	if etag := h.Get("ETag"); etag != "" && etag != e.header.Get("ETag") {
 		return false
@@ -168,22 +151,17 @@ func headMatches(e *entry, h http.Header) bool {
 	return true
 }
 
-// kept lists the fields of a stored response that a 304 does not update
-// (§3.2): its body and its place in the store depend on them. Its
-// representation metadata is among them, which a 304 has no reason to carry
-// (RFC 9110 §15.4.5): the one a backend sends with it may describe another
-// representation than the stored body, chosen by a request header field that
-// Vary does not name. With Accept: text/html, a client would otherwise have
-// a JSON body served as HTML to everyone.
+// kept lists the fields of a stored response that a 304 does not update (§3.2): its body and its place in the store depend on them. Its
+// representation metadata is among them, which a 304 has no reason to carry (RFC 9110 §15.4.5): the one a backend sends with it may
+// describe another representation than the stored body, chosen by a request header field that Vary does not name. With Accept: text/html, a
+// client would otherwise have a JSON body served as HTML to everyone.
 var kept = []string{"Content-Type", "Content-Encoding", "Content-Language", "Content-Range", "Vary"}
 
-// refreshed returns the stored response e updated by a 304, or by the response
-// to a HEAD, with header h (§3.2, §4.3.4, §4.3.5): the same body, the fields of
-// that response in place of its own, and the times of the exchange.
+// refreshed returns the stored response e updated by a 304, or by the response to a HEAD, with header h (§3.2, §4.3.4, §4.3.5): the same
+// body, the fields of that response in place of its own, and the times of the exchange.
 func refreshed(e *entry, h http.Header, requestTime, responseTime time.Time) *entry {
 	header := e.header.Clone()
-	// These belong to an exchange, not to the response: gone unless h has
-	// them.
+	// These belong to an exchange, not to the response: gone unless h has them.
 	header.Del("Age")
 	header.Del("Date")
 	update := endToEnd(h)
@@ -191,8 +169,8 @@ func refreshed(e *entry, h http.Header, requestTime, responseTime time.Time) *en
 		update.Del(name)
 	}
 	for name, values := range update {
-		// A field set to no value is one the response does not have: a server
-		// does that to the Content-Type of a 304, to keep net/http from guessing.
+		// A field set to no value is one the response does not have: a server does that to the Content-Type of a 304, to keep net/http from
+		// guessing.
 		if len(values) > 0 {
 			header[name] = values
 		}
@@ -216,9 +194,8 @@ func refreshed(e *entry, h http.Header, requestTime, responseTime time.Time) *en
 	return out
 }
 
-// ownFields returns the fields of a 304 with header h that are for the client
-// that caused the validation of e, and nobody else: Set-Cookie, and the fields
-// that the 304 or e forbid to store. The stored response does not have them.
+// ownFields returns the fields of a 304 with header h that are for the client that caused the validation of e, and nobody else: Set-Cookie,
+// and the fields that the 304 or e forbid to store. The stored response does not have them.
 func ownFields(e *entry, h http.Header) http.Header {
 	names := []string{"Set-Cookie"}
 	names = append(names, parseCacheControl(h.Values("Cache-Control")).unstored...)

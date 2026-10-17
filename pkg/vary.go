@@ -9,8 +9,8 @@ import (
 	"sync"
 )
 
-// markerVersion prefixes every marker. Bump it on any change of the marker or
-// of the variant fields: a marker with an unknown version is a miss.
+// markerVersion prefixes every marker. Bump it on any change of the marker or of the variant fields: a marker with an unknown version is a
+// miss.
 const markerVersion = "TRV1"
 
 const (
@@ -18,14 +18,13 @@ const (
 	identity       = "identity"
 )
 
-// contentCodings lists the content codings a variant may be selected by. When
-// a request accepts several of the stored ones, it is served the first.
+// contentCodings lists the content codings a variant may be selected by. When a request accepts several of the stored ones, it is served
+// the first.
 var contentCodings = []string{"zstd", "br", "gzip", "deflate"}
 
-// varyNames returns the header names listed by the Vary of a response:
-// canonical, sorted, without duplicates, and none without Vary. ok is false
-// when no variant can be stored for it: "*" (§4.1), a name that is not a token,
-// and Cookie or Authorization, which make one variant per user.
+// varyNames returns the header names listed by the Vary of a response: canonical, sorted, without duplicates, and none without Vary. ok is
+// false when no variant can be stored for it: "*" (§4.1), a name that is not a token, and Cookie or Authorization, which make one variant
+// per user.
 func varyNames(h http.Header) ([]string, bool) {
 	lines := h.Values("Vary")
 	if len(lines) == 0 {
@@ -66,10 +65,8 @@ func isToken(s string) bool {
 	return s != ""
 }
 
-// storableVary reports whether a response has a variant to be stored as (see
-// varyNames), which takes a maxVariants that allows some. One that varies by
-// Accept-Encoding is stored by its content coding, which must be one the
-// cache knows.
+// storableVary reports whether a response has a variant to be stored as (see varyNames), which takes a maxVariants that allows some. One
+// that varies by Accept-Encoding is stored by its content coding, which must be one the cache knows.
 func storableVary(h http.Header, maxVariants int) bool {
 	names, ok := varyNames(h)
 	if !ok || (len(names) > 0 && maxVariants == 0) {
@@ -83,8 +80,7 @@ func storableVary(h http.Header, maxVariants int) bool {
 	return true
 }
 
-// responseCoding returns the content coding of a response: one of
-// contentCodings, or identity without Content-Encoding. ok is false for any
+// responseCoding returns the content coding of a response: one of contentCodings, or identity without Content-Encoding. ok is false for any
 // other coding and for several of them: the cache cannot tell who accepts it.
 func responseCoding(h http.Header) (string, bool) {
 	coding := ""
@@ -107,8 +103,7 @@ func responseCoding(h http.Header) (string, bool) {
 	return coding, true
 }
 
-// accepts is what the Accept-Encoding of a request says, worked out when a
-// variant is first selected by it and once per request.
+// accepts is what the Accept-Encoding of a request says, worked out when a variant is first selected by it and once per request.
 type accepts struct {
 	header     http.Header // of the request
 	parsed     bool
@@ -127,16 +122,13 @@ func parseAccepts(a *accepts) {
 	a.parsed = true
 }
 
-// acceptedCodings returns the codings of contentCodings that a request accepts
-// (RFC 9110 §12.5.3), in the same order. A weight only matters when it is zero:
-// the coding is refused. A request without Accept-Encoding is taken as
-// accepting none of them, as backends do.
+// acceptedCodings returns the codings of contentCodings that a request accepts (RFC 9110 §12.5.3), in the same order. A weight only matters
+// when it is zero: the coding is refused. A request without Accept-Encoding is taken as accepting none of them, as backends do.
 func acceptedCodings(h http.Header) []string {
 	return acceptedOf(listedCodings(h))
 }
 
-// acceptedOf returns the codings of contentCodings that listed accepts (see
-// listedCodings).
+// acceptedOf returns the codings of contentCodings that listed accepts (see listedCodings).
 func acceptedOf(listed map[string]bool) []string {
 	var accepted []string
 	for _, coding := range contentCodings {
@@ -151,8 +143,7 @@ func acceptedOf(listed map[string]bool) []string {
 	return accepted
 }
 
-// listedCodings returns the codings listed by the Accept-Encoding of a request
-// ("*" is one of them), and whether each one is accepted.
+// listedCodings returns the codings listed by the Accept-Encoding of a request ("*" is one of them), and whether each one is accepted.
 func listedCodings(h http.Header) map[string]bool {
 	listed := map[string]bool{}
 	for _, line := range h.Values(acceptEncoding) {
@@ -167,9 +158,8 @@ func listedCodings(h http.Header) map[string]bool {
 	return listed
 }
 
-// identityRefused reports whether a request refuses an uncompressed response
-// (RFC 9110 §12.5.3): "identity;q=0", or "*;q=0" when identity is not listed.
-// listed is what its Accept-Encoding lists (see listedCodings).
+// identityRefused reports whether a request refuses an uncompressed response (RFC 9110 §12.5.3): "identity;q=0", or "*;q=0" when identity
+// is not listed. listed is what its Accept-Encoding lists (see listedCodings).
 func identityRefused(listed map[string]bool) bool {
 	if ok, found := listed[identity]; found {
 		return !ok
@@ -190,9 +180,8 @@ func zeroWeight(params string) bool {
 	return false
 }
 
-// requestValue returns the value of a request header as variants are compared
-// by (§4.1): its lines trimmed and joined. ok is false when the request does
-// not have the header, which is not the same as an empty value.
+// requestValue returns the value of a request header as variants are compared by (§4.1): its lines trimmed and joined. ok is false when the
+// request does not have the header, which is not the same as an empty value.
 func requestValue(h http.Header, name string) (string, bool) {
 	values := h.Values(name)
 	if len(values) == 0 {
@@ -206,11 +195,9 @@ func requestValue(h http.Header, name string) (string, bool) {
 	return value, true
 }
 
-// variantField returns the field of a variant: the hash of the Vary header
-// names and of the values of the request header h they select. Accept-Encoding
-// is the exception: its value is the content coding of the response, so that
-// all the requests accepting a coding share its variant, and clients cannot
-// make variants of their own.
+// variantField returns the field of a variant: the hash of the Vary header names and of the values of the request header h they select.
+// Accept-Encoding is the exception: its value is the content coding of the response, so that all the requests accepting a coding share its
+// variant, and clients cannot make variants of their own.
 func variantField(names []string, h http.Header, coding string) string {
 	var b strings.Builder
 	for _, name := range names {
@@ -225,15 +212,14 @@ func variantField(names []string, h http.Header, coding string) string {
 	return hashHex(b.String())
 }
 
-// marker is what the field "" of a URI key holds when the responses of the URI
-// vary: what it takes to find the field of the variant selected by a request.
+// marker is what the field "" of a URI key holds when the responses of the URI vary: what it takes to find the field of the variant
+// selected by a request.
 //
-// Encoding: "TRV1" | Vary header names, comma separated | "\n" | content
-// codings, comma separated.
+// Encoding: "TRV1" | Vary header names, comma separated | "\n" | content codings, comma separated.
 type marker struct {
 	names []string // as returned by varyNames
-	// codings holds the content codings of the stored variants, in the order of
-	// contentCodings then identity, when names has Accept-Encoding.
+	// codings holds the content codings of the stored variants, in the order of contentCodings then identity, when names has
+	// Accept-Encoding.
 	codings []string
 }
 
@@ -241,8 +227,7 @@ func encodeMarker(m marker) []byte {
 	return []byte(markerVersion + strings.Join(m.names, ",") + "\n" + strings.Join(m.codings, ","))
 }
 
-// decodeMarker parses a marker. ok is false for anything else: an entry,
-// another version or corrupt data (stored data is untrusted).
+// decodeMarker parses a marker. ok is false for anything else: an entry, another version or corrupt data (stored data is untrusted).
 func decodeMarker(b []byte) (marker, bool) {
 	if len(b) < len(markerVersion) || string(b[:len(markerVersion)]) != markerVersion {
 		return marker{}, false
@@ -268,8 +253,8 @@ func decodeMarker(b []byte) (marker, bool) {
 	return m, true
 }
 
-// field returns the field of the variant to serve a request with header h, or
-// "" when no stored variant can suit it. a is what the request accepts.
+// field returns the field of the variant to serve a request with header h, or "" when no stored variant can suit it. a is what the request
+// accepts.
 func (m marker) field(h http.Header, a *accepts) string {
 	coding := ""
 	if slices.Contains(m.names, acceptEncoding) {
@@ -282,9 +267,8 @@ func (m marker) field(h http.Header, a *accepts) string {
 	return variantField(m.names, h, coding)
 }
 
-// pick returns the content coding of the variant to serve a request accepting
-// the given codings: the first of contentCodings that is stored and accepted,
-// then identity (selects tells whether that one suits the request).
+// pick returns the content coding of the variant to serve a request accepting the given codings: the first of contentCodings that is stored
+// and accepted, then identity (selects tells whether that one suits the request).
 func (m marker) pick(accepted []string) string {
 	for _, coding := range contentCodings {
 		if slices.Contains(accepted, coding) && slices.Contains(m.codings, coding) {
@@ -297,8 +281,7 @@ func (m marker) pick(accepted []string) string {
 	return ""
 }
 
-// variant tells where a response is stored in its URI key, and what it was
-// selected by.
+// variant tells where a response is stored in its URI key, and what it was selected by.
 type variant struct {
 	names    []string    // Vary header names; none: the response is the entry of field ""
 	field    string      // "" without names
@@ -307,8 +290,7 @@ type variant struct {
 	accepted []string    // codings accepted by the request, then
 }
 
-// newVariant returns the variant of a response with header h to req, which
-// storableVary allowed.
+// newVariant returns the variant of a response with header h to req, which storableVary allowed.
 func newVariant(req *http.Request, h http.Header) variant {
 	names, _ := varyNames(h)
 	v := variant{names: names, selected: http.Header{}}
@@ -329,8 +311,8 @@ func newVariant(req *http.Request, h http.Header) variant {
 	return v
 }
 
-// variantOf returns the variant of e, a stored response read from field that
-// is stored again for req: what it was selected by does not change.
+// variantOf returns the variant of e, a stored response read from field that is stored again for req: what it was selected by does not
+// change.
 func variantOf(req *http.Request, e *entry, field string) variant {
 	names, _ := varyNames(e.header)
 	v := variant{names: names, field: field, selected: e.vary}
@@ -342,10 +324,9 @@ func variantOf(req *http.Request, e *entry, field string) variant {
 	return v
 }
 
-// listed returns the codings of the marker once the variant is stored: those
-// of the previous marker and its own. A coding that the request accepts and
-// that pick would choose before the one the backend answered with is dropped:
-// its variant is gone or outdated, and would hide this one from such requests.
+// listed returns the codings of the marker once the variant is stored: those of the previous marker and its own. A coding that the request
+// accepts and that pick would choose before the one the backend answered with is dropped: its variant is gone or outdated, and would hide
+// this one from such requests.
 func (v variant) listed(old []string) []string {
 	var codings []string
 	reached := false // past v.coding: what follows is picked after it
@@ -363,10 +344,8 @@ func (v variant) listed(old []string) []string {
 	return codings
 }
 
-// selects reports whether a stored response may answer a request with header h
-// (§4.1): the request headers named by its Vary are those of the request it was
-// stored for. Accept-Encoding is compared by what it means instead (see suits):
-// a is what the request accepts.
+// selects reports whether a stored response may answer a request with header h (§4.1): the request headers named by its Vary are those of
+// the request it was stored for. Accept-Encoding is compared by what it means instead (see suits): a is what the request accepts.
 func selects(e *entry, h http.Header, a *accepts) bool {
 	names, ok := varyNames(e.header)
 	if !ok {
@@ -391,13 +370,10 @@ func selects(e *entry, h http.Header, a *accepts) bool {
 	return true
 }
 
-// suits reports whether a stored response varying by Accept-Encoding may be
-// sent to a request accepting a: its content coding is one of those the
-// request accepts. An uncompressed response is acceptable to all but the
-// requests refusing it (RFC 9110 §12.5.3), but only suits the requests
-// accepting no other coding than the one it was stored for did: offered those,
-// the backend did not compress. Any other request is forwarded, the backend
-// may compress for it.
+// suits reports whether a stored response varying by Accept-Encoding may be sent to a request accepting a: its content coding is one of
+// those the request accepts. An uncompressed response is acceptable to all but the requests refusing it (RFC 9110 §12.5.3), but only suits
+// the requests accepting no other coding than the one it was stored for did: offered those, the backend did not compress. Any other request
+// is forwarded, the backend may compress for it.
 func suits(e *entry, a *accepts) bool {
 	coding, ok := responseCoding(e.header)
 	if !ok {
@@ -422,10 +398,8 @@ func suits(e *entry, a *accepts) bool {
 // maxMarkers bounds the markers kept in memory (see markers).
 const maxMarkers = 4096
 
-// markers remembers the marker last seen in the keys whose responses vary. It
-// is only a guess of what Redis holds, which is what counts: it tells find
-// which variant to ask for along with the marker, in one round trip instead of
-// two. It is emptied when full.
+// markers remembers the marker last seen in the keys whose responses vary. It is only a guess of what Redis holds, which is what counts: it
+// tells find which variant to ask for along with the marker, in one round trip instead of two. It is emptied when full.
 type markers struct {
 	mu    sync.Mutex // guards known, which find reads by itself
 	known map[string]knownMarker

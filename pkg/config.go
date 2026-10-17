@@ -55,8 +55,7 @@ type RedisConfig struct {
 
 // RedisTLSConfig tells how the certificate of Redis is verified.
 type RedisTLSConfig struct {
-	// CA is a PEM file, or its content: the authorities that may have signed
-	// the certificate, in place of those of the system.
+	// CA is a PEM file, or its content: the authorities that may have signed the certificate, in place of those of the system.
 	CA                 string `json:"ca,omitempty"`
 	InsecureSkipVerify bool   `json:"insecureSkipVerify,omitempty"`
 }
@@ -101,22 +100,18 @@ type settings struct {
 	maxBodyBytes                int64
 	// maxBufferedBytes bounds the bodies held in memory at once (see budget).
 	maxBufferedBytes int64
-	// maxVariants is the number of variants a URI key may hold, on top of its
-	// marker. Past it, new variants are not stored: stored ones are never
-	// evicted. 0: responses with Vary are not stored.
+	// maxVariants is the number of variants a URI key may hold, on top of its marker. Past it, new variants are not stored: stored ones are
+	// never evicted. 0: responses with Vary are not stored.
 	maxVariants int
-	// Background revalidations (RFC 5861 §3) are bounded: maxRevalidations at
-	// once, each given revalidationTimeout (see revalidate).
+	// Background revalidations (RFC 5861 §3) are bounded: maxRevalidations at once, each given revalidationTimeout (see revalidate).
 	maxRevalidations    int
 	revalidationTimeout time.Duration
-	// sortQuery makes the order of the query parameters irrelevant to the
-	// cache key (see cacheURI).
+	// sortQuery makes the order of the query parameters irrelevant to the cache key (see cacheURI).
 	sortQuery bool
-	// authorizationHeaders lists the request header fields that tell who the
-	// client is, as Authorization does (see storeTTL): canonical names.
+	// authorizationHeaders lists the request header fields that tell who the client is, as Authorization does (see storeTTL): canonical
+	// names.
 	authorizationHeaders []string
-	// ignoreClientCacheControl makes the cache act as if requests had no
-	// Cache-Control (see ServeHTTP).
+	// ignoreClientCacheControl makes the cache act as if requests had no Cache-Control (see ServeHTTP).
 	ignoreClientCacheControl bool
 	exposeCacheStatus        bool
 	exposeKey                bool
@@ -128,17 +123,15 @@ type redisOptions struct {
 	username string
 	password string
 	db       int
-	// tls is set for a rediss:// DSN: connections are encrypted, and the
-	// certificate of Redis verified with it.
+	// tls is set for a rediss:// DSN: connections are encrypted, and the certificate of Redis verified with it.
 	tls *tls.Config
 	// poolSize is the number of connections, at most.
 	poolSize int
-	// dialTimeout bounds getting a connection, a free one of the pool or a new
-	// one; timeout bounds a whole operation, getting its connection included.
+	// dialTimeout bounds getting a connection, a free one of the pool or a new one; timeout bounds a whole operation, getting its
+	// connection included.
 	dialTimeout time.Duration
 	timeout     time.Duration
-	// After maxFailures failures in a row, Redis is only tried again every
-	// retryAfter (see do). 0: it is tried by every command.
+	// After maxFailures failures in a row, Redis is only tried again every retryAfter (see do). 0: it is tried by every command.
 	maxFailures int
 	retryAfter  time.Duration
 }
@@ -255,8 +248,7 @@ func parseConfig(cfg *Config) (settings, error) {
 	return s, nil
 }
 
-// parseHeaderNames parses a list of header field names: canonical, without
-// duplicates.
+// parseHeaderNames parses a list of header field names: canonical, without duplicates.
 func parseHeaderNames(option string, values []string) ([]string, error) {
 	var names []string
 	for _, value := range values {
@@ -272,9 +264,8 @@ func parseHeaderNames(option string, values []string) ([]string, error) {
 	return names, nil
 }
 
-// parseStatusCodes parses statusCodes: codes (404) and inclusive ranges
-// (400-499), as Traefik writes them. It returns the codes that may be stored,
-// sorted and without duplicates.
+// parseStatusCodes parses statusCodes: codes (404) and inclusive ranges (400-499), as Traefik writes them. It returns the codes that may be
+// stored, sorted and without duplicates.
 func parseStatusCodes(values []string) ([]int, error) {
 	if len(values) == 0 {
 		return nil, errors.New("statusCodes must not be empty")
@@ -326,8 +317,7 @@ func parseStatusRange(value string) (int, int, error) {
 	return from, to, nil
 }
 
-// storableStatus reports whether a response with this status may be stored, if
-// statusCodes lists it (see storeTTL).
+// storableStatus reports whether a response with this status may be stored, if statusCodes lists it (see storeTTL).
 func storableStatus(code int) bool {
 	return code >= 200 && code != http.StatusPartialContent && code != http.StatusNotModified
 }
@@ -369,8 +359,8 @@ func setTLS(o *redisOptions, cfg RedisTLSConfig) error {
 	return nil
 }
 
-// parseDSN parses redis://[user[:password]@]host[:port][/db], or rediss:// for
-// TLS. Errors never include the DSN itself, which may hold credentials.
+// parseDSN parses redis://[user[:password]@]host[:port][/db], or rediss:// for TLS. Errors never include the DSN itself, which may hold
+// credentials.
 func parseDSN(dsn string) (redisOptions, error) {
 	var o redisOptions
 	u, err := url.Parse(strings.TrimSpace(dsn))

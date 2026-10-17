@@ -122,8 +122,7 @@ func TestRecorderSkipsCaptureForLargeContentLength(t *testing.T) {
 	}
 }
 
-// With a Content-Length, the copy is allocated once: a body is not copied
-// again and again as it grows.
+// With a Content-Length, the copy is allocated once: a body is not copied again and again as it grows.
 func TestRecorderAllocatesItsCopyOnce(t *testing.T) {
 	const size = 64 << 10
 	rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: true}, 1<<20, nil)
@@ -203,9 +202,8 @@ func TestRecorderPassesInformationalResponses(t *testing.T) {
 	}
 }
 
-// Under Yaegi v0.16.1, compiled code cannot see Flush on an interpreted
-// ResponseWriter (see recorder); the method still flushes the compiled writer
-// it wraps.
+// Under Yaegi v0.16.1, compiled code cannot see Flush on an interpreted ResponseWriter (see recorder); the method still flushes the
+// compiled writer it wraps.
 func TestRecorderPreservesFlusher(t *testing.T) {
 	rw := httptest.NewRecorder()
 	rec := newRecorder(rw, &hookStub{}, 1024, nil)
@@ -220,12 +218,9 @@ func TestRecorderPreservesFlusher(t *testing.T) {
 	}
 }
 
-// Compiled code cannot flush an interpreted writer under Yaegi v0.16.1: the
-// recorder flushes by itself a response of unknown length, so that one that
-// streams still does, kept for the store or not. A response with a
-// Content-Length is never flushed: that would make a compress middleware
-// before the cache compress the small ones. The client writer is a compiled
-// one, as in Traefik.
+// Compiled code cannot flush an interpreted writer under Yaegi v0.16.1: the recorder flushes by itself a response of unknown length, so
+// that one that streams still does, kept for the store or not. A response with a Content-Length is never flushed: that would make a
+// compress middleware before the cache compress the small ones. The client writer is a compiled one, as in Traefik.
 func TestRecorderFlushes(t *testing.T) {
 	tests := []struct {
 		name          string

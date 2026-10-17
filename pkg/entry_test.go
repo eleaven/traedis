@@ -34,7 +34,17 @@ func TestEntryRoundTrip(t *testing.T) {
 		e    *entry
 	}{
 		{name: "full entry", e: sampleEntry()},
-		{name: "empty body and headers, no explicit freshness", e: &entry{status: 204, header: http.Header{}, vary: http.Header{}, lifetime: -1, requestTime: time.Unix(0, 0), responseTime: time.Unix(0, 0)}},
+		{
+			name: "empty body and headers, no explicit freshness",
+			e: &entry{
+				status:       204,
+				header:       http.Header{},
+				vary:         http.Header{},
+				lifetime:     -1,
+				requestTime:  time.Unix(0, 0),
+				responseTime: time.Unix(0, 0),
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -97,7 +107,11 @@ func TestDecodeEntryRejectsInvalidData(t *testing.T) {
 		{name: "unknown version is a miss", data: append([]byte("TRD9"), valid[4:]...), maxBody: 1 << 20},
 		{name: "previous version is a miss", data: append([]byte("TRD1"), valid[4:]...), maxBody: 1 << 20},
 		{name: "body larger than maxBodyBytes is a miss", data: valid, maxBody: sampleEntry().size - 1},
-		{name: "oversized entry is a miss", data: fields("X-Large: " + strings.Repeat("a", entryOverhead) + "\r\n\r\n\r\n"), maxBody: 1 << 20},
+		{
+			name:    "oversized entry is a miss",
+			data:    fields("X-Large: " + strings.Repeat("a", entryOverhead) + "\r\n\r\n\r\n"),
+			maxBody: 1 << 20,
+		},
 		{name: "trailing garbage", data: append(append([]byte(nil), valid...), 0), maxBody: 1 << 20},
 		{name: "negative size", data: with(38, negative), maxBody: 1 << 20},
 		{name: "negative initial age", data: with(22, negative), maxBody: 1 << 20},

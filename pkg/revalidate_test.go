@@ -61,7 +61,8 @@ func TestStaleWhileRevalidate(t *testing.T) {
 	if rec.Code != 206 || rec.Body.String() != "ol" {
 		t.Fatalf("RFC 5861 §3 the stale response must be served: got %d %q", rec.Code, rec.Body.String())
 	}
-	if got := lastCacheStatus(rec); got != "traedis; hit; ttl=-10; detail=stale-while-revalidate" && got != "traedis; hit; ttl=-11; detail=stale-while-revalidate" {
+	if got := lastCacheStatus(rec); got != "traedis; hit; ttl=-10; detail=stale-while-revalidate" &&
+		got != "traedis; hit; ttl=-11; detail=stale-while-revalidate" {
 		t.Errorf("Cache-Status = %q", got)
 	}
 	if age := rec.Header().Get("Age"); age != "70" && age != "71" {
@@ -96,7 +97,8 @@ func TestStaleWhileRevalidate(t *testing.T) {
 
 	// The entry was replaced: the next request is a fresh hit.
 	next := doRequest(c, http.MethodGet, staleURL, nil)
-	if b.calls != 1 || next.Body.String() != "hello" || !strings.HasPrefix(lastCacheStatus(next), "traedis; hit; ttl=") || isStaleWhileRevalidate(lastCacheStatus(next)) {
+	if b.calls != 1 || next.Body.String() != "hello" || !strings.HasPrefix(lastCacheStatus(next), "traedis; hit; ttl=") ||
+		isStaleWhileRevalidate(lastCacheStatus(next)) {
 		t.Errorf("after revalidation: %q %q (backend calls %d)", next.Body.String(), lastCacheStatus(next), b.calls)
 	}
 }
@@ -108,7 +110,10 @@ func TestStaleWhileRevalidateOnHead(t *testing.T) {
 
 	rec := doRequest(c, http.MethodHead, staleURL, nil)
 	if rec.Body.Len() != 0 || rec.Header().Get("Content-Length") != "3" || !isStaleWhileRevalidate(lastCacheStatus(rec)) {
-		t.Errorf("HEAD: body %q, Content-Length %q, Cache-Status %q", rec.Body.String(), rec.Header().Get("Content-Length"), lastCacheStatus(rec))
+		t.Errorf(
+			"HEAD: body %q, Content-Length %q, Cache-Status %q",
+			rec.Body.String(), rec.Header().Get("Content-Length"), lastCacheStatus(rec),
+		)
 	}
 	waitRevalidations(t, c)
 	if b.calls != 1 || b.lastReq.Method != http.MethodGet || st.sets != 2 {
@@ -144,16 +149,51 @@ func TestNotServedWhileRevalidating(t *testing.T) {
 	}{
 		{name: "§4.2.4 no directive", cacheControl: "max-age=60", age: 70 * time.Second},
 		{name: "RFC 5861 §3 window over", cacheControl: "max-age=60, stale-while-revalidate=30", age: 91 * time.Second},
-		{name: "window capped at staleTtl", cacheControl: "max-age=60, stale-while-revalidate=3600", age: 80 * time.Second, mutate: func(c *Config) { c.StaleTTL = "10s" }},
+		{
+			name:         "window capped at staleTtl",
+			cacheControl: "max-age=60, stale-while-revalidate=3600",
+			age:          80 * time.Second,
+			mutate:       func(c *Config) { c.StaleTTL = "10s" },
+		},
 		{name: "§5.2.2.2 must-revalidate", cacheControl: "max-age=60, stale-while-revalidate=30, must-revalidate", age: 70 * time.Second},
 		{name: "§5.2.2.8 proxy-revalidate", cacheControl: "max-age=60, stale-while-revalidate=30, proxy-revalidate", age: 70 * time.Second},
 		{name: "§5.2.2.10 s-maxage", cacheControl: "s-maxage=60, stale-while-revalidate=30", age: 70 * time.Second},
-		{name: "§5.2.1.1 request max-age", cacheControl: "max-age=60, stale-while-revalidate=30", age: 70 * time.Second, reqHdr: http.Header{"Cache-Control": {"max-age=600"}}},
-		{name: "§5.2.1.3 request min-fresh", cacheControl: "max-age=60, stale-while-revalidate=30", age: 70 * time.Second, reqHdr: http.Header{"Cache-Control": {"min-fresh=1"}}},
-		{name: "defaultStaleWhileRevalidate over", cacheControl: "max-age=60", age: 91 * time.Second, mutate: func(c *Config) { c.DefaultStaleWhileRevalidate = "30s" }},
-		{name: "defaultStaleWhileRevalidate does not replace the directive", cacheControl: "max-age=60, stale-while-revalidate=0", age: 70 * time.Second, mutate: func(c *Config) { c.DefaultStaleWhileRevalidate = "30s" }},
-		{name: "defaultStaleWhileRevalidate with §5.2.2.2 must-revalidate", cacheControl: "max-age=60, must-revalidate", age: 70 * time.Second, mutate: func(c *Config) { c.DefaultStaleWhileRevalidate = "30s" }},
-		{name: "defaultStaleIfError is not defaultStaleWhileRevalidate", cacheControl: "max-age=60", age: 70 * time.Second, mutate: func(c *Config) { c.DefaultStaleIfError = "30s" }},
+		{
+			name:         "§5.2.1.1 request max-age",
+			cacheControl: "max-age=60, stale-while-revalidate=30",
+			age:          70 * time.Second,
+			reqHdr:       http.Header{"Cache-Control": {"max-age=600"}},
+		},
+		{
+			name:         "§5.2.1.3 request min-fresh",
+			cacheControl: "max-age=60, stale-while-revalidate=30",
+			age:          70 * time.Second,
+			reqHdr:       http.Header{"Cache-Control": {"min-fresh=1"}},
+		},
+		{
+			name:         "defaultStaleWhileRevalidate over",
+			cacheControl: "max-age=60",
+			age:          91 * time.Second,
+			mutate:       func(c *Config) { c.DefaultStaleWhileRevalidate = "30s" },
+		},
+		{
+			name:         "defaultStaleWhileRevalidate does not replace the directive",
+			cacheControl: "max-age=60, stale-while-revalidate=0",
+			age:          70 * time.Second,
+			mutate:       func(c *Config) { c.DefaultStaleWhileRevalidate = "30s" },
+		},
+		{
+			name:         "defaultStaleWhileRevalidate with §5.2.2.2 must-revalidate",
+			cacheControl: "max-age=60, must-revalidate",
+			age:          70 * time.Second,
+			mutate:       func(c *Config) { c.DefaultStaleWhileRevalidate = "30s" },
+		},
+		{
+			name:         "defaultStaleIfError is not defaultStaleWhileRevalidate",
+			cacheControl: "max-age=60",
+			age:          70 * time.Second,
+			mutate:       func(c *Config) { c.DefaultStaleIfError = "30s" },
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -196,17 +236,57 @@ func TestRevalidationOutcome(t *testing.T) {
 		{name: "throttling keeps it", status: 429, respHdr: http.Header{}},
 		{name: "status not in statusCodes deletes it", status: 404, respHdr: http.Header{"Cache-Control": {"max-age=60"}}, deleted: true},
 		{name: "resource gone deletes it", status: 410, respHdr: http.Header{}, deleted: true},
-		{name: "a client's Authorization rejected by the backend cannot evict it", reqHdr: http.Header{"Authorization": {"Bearer x"}}, status: 401, respHdr: http.Header{}},
-		{name: "a client's Cookie rejected by the backend cannot evict it", reqHdr: http.Header{"Cookie": {"sid=1"}}, status: 403, respHdr: http.Header{"Cache-Control": {"no-store"}}},
-		{name: "a request rejected by the backend cannot evict it", reqHdr: http.Header{"X-Custom": {"bad"}}, status: 400, respHdr: http.Header{}},
+		{
+			name:    "a client's Authorization rejected by the backend cannot evict it",
+			reqHdr:  http.Header{"Authorization": {"Bearer x"}},
+			status:  401,
+			respHdr: http.Header{},
+		},
+		{
+			name:    "a client's Cookie rejected by the backend cannot evict it",
+			reqHdr:  http.Header{"Cookie": {"sid=1"}},
+			status:  403,
+			respHdr: http.Header{"Cache-Control": {"no-store"}},
+		},
+		{
+			name:    "a request rejected by the backend cannot evict it",
+			reqHdr:  http.Header{"X-Custom": {"bad"}},
+			status:  400,
+			respHdr: http.Header{},
+		},
 		{name: "§5.2.2.5 no-store keeps it: a client's request may get it", respHdr: http.Header{"Cache-Control": {"no-store"}}},
 		{name: "§5.2.2.7 private keeps it: a client's request may get it", respHdr: http.Header{"Cache-Control": {"private, max-age=60"}}},
-		{name: "a client's request answered with Set-Cookie cannot evict it", reqHdr: http.Header{"Cookie": {"sid=bogus"}}, respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Set-Cookie": {"sid=new"}}},
-		{name: "body larger than maxBodyBytes keeps it", respHdr: http.Header{"Cache-Control": {"max-age=60"}}, body: strings.Repeat("x", 100), mutate: func(c *Config) { c.MaxBodyBytes = 10 }},
-		{name: "a 404 too large to be stored deletes it", status: 404, respHdr: http.Header{"Cache-Control": {"max-age=60"}}, body: strings.Repeat("x", 100), mutate: func(c *Config) { c.MaxBodyBytes = 10; c.StatusCodes = []string{"200", "404"} }, deleted: true},
+		{
+			name:    "a client's request answered with Set-Cookie cannot evict it",
+			reqHdr:  http.Header{"Cookie": {"sid=bogus"}},
+			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Set-Cookie": {"sid=new"}},
+		},
+		{
+			name:    "body larger than maxBodyBytes keeps it",
+			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
+			body:    strings.Repeat("x", 100),
+			mutate:  func(c *Config) { c.MaxBodyBytes = 10 },
+		},
+		{
+			name:    "a 404 too large to be stored deletes it",
+			status:  404,
+			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
+			body:    strings.Repeat("x", 100),
+			mutate:  func(c *Config) { c.MaxBodyBytes = 10; c.StatusCodes = []string{"200", "404"} },
+			deleted: true,
+		},
 		{name: "a client's Cookie cannot evict it", reqHdr: http.Header{"Cookie": {"sid=1"}}, respHdr: http.Header{}},
-		{name: "a client's Authorization cannot evict it", reqHdr: http.Header{"Authorization": {"Bearer x"}}, respHdr: http.Header{"Cache-Control": {"max-age=60"}}},
-		{name: "a client's no-store cannot evict it nor prevent the refresh", reqHdr: http.Header{"Cache-Control": {"no-store"}}, respHdr: http.Header{"Cache-Control": {"max-age=60"}}, replaced: true},
+		{
+			name:    "a client's Authorization cannot evict it",
+			reqHdr:  http.Header{"Authorization": {"Bearer x"}},
+			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
+		},
+		{
+			name:     "a client's no-store cannot evict it nor prevent the refresh",
+			reqHdr:   http.Header{"Cache-Control": {"no-store"}},
+			respHdr:  http.Header{"Cache-Control": {"max-age=60"}},
+			replaced: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -292,8 +372,7 @@ func TestRevalidationIsNotRepeatedWhileRunning(t *testing.T) {
 	}
 }
 
-// waitingBackend never answers: it waits for its request to be given up, as
-// Traefik's proxy does, which then answers a 504.
+// waitingBackend never answers: it waits for its request to be given up, as Traefik's proxy does, which then answers a 504.
 type waitingBackend struct {
 	gaveUp chan struct{}
 }
@@ -304,8 +383,7 @@ func (b *waitingBackend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	close(b.gaveUp)
 }
 
-// A background revalidation is given revalidationTimeout: a backend that
-// never answers does not keep its place for ever.
+// A background revalidation is given revalidationTimeout: a backend that never answers does not keep its place for ever.
 func TestRevalidationTimeout(t *testing.T) {
 	b := &waitingBackend{gaveUp: make(chan struct{})}
 	c, st := newTestCache(t, b, func(cfg *Config) { cfg.RevalidationTimeout = "50ms" })
@@ -359,17 +437,22 @@ func TestRevalidationPanicIsRecovered(t *testing.T) {
 	}
 }
 
-// §3.3: a response that the backend cuts short is not stored, whether it had a
-// Content-Length or not. Traefik's proxy (httputil.ReverseProxy) aborts such a
-// response with a panic, but only for a request that has a server: the one of
-// a background revalidation must keep it.
+// §3.3: a response that the backend cuts short is not stored, whether it had a Content-Length or not. Traefik's proxy
+// (httputil.ReverseProxy) aborts such a response with a panic, but only for a request that has a server: the one of a background
+// revalidation must keep it.
 func TestIncompleteResponseIsNotStored(t *testing.T) {
 	tests := []struct {
 		name     string
 		response string
 	}{
-		{name: "§3.3 shorter than its Content-Length", response: "HTTP/1.1 200 OK\r\nCache-Control: max-age=60\r\nContent-Length: 10\r\n\r\nhello"},
-		{name: "§3.3 chunked without its last chunk", response: "HTTP/1.1 200 OK\r\nCache-Control: max-age=60\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n"},
+		{
+			name:     "§3.3 shorter than its Content-Length",
+			response: "HTTP/1.1 200 OK\r\nCache-Control: max-age=60\r\nContent-Length: 10\r\n\r\nhello",
+		},
+		{
+			name:     "§3.3 chunked without its last chunk",
+			response: "HTTP/1.1 200 OK\r\nCache-Control: max-age=60\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -419,7 +502,9 @@ func TestIncompleteResponseIsNotStored(t *testing.T) {
 			}
 			waitRevalidations(t, c)
 			if v, kept := st.lookup(key, ""); !kept || st.sets != 1 {
-				t.Errorf("background revalidation: the entry must be left as it was (kept %v, %d bytes, %d writes)", kept, len(v.value), st.sets)
+				t.Errorf(
+					"background revalidation: the entry must be left as it was (kept %v, %d bytes, %d writes)", kept, len(v.value), st.sets,
+				)
 			}
 		})
 	}

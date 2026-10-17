@@ -1,13 +1,9 @@
-// Why a hand-written client instead of github.com/redis/go-redis: Traefik runs
-// the plugin through Yaegi v0.16.1, which cannot load go-redis (checked with
-// v9.8.0, the first with HSETEX, up to v9.23.0):
-//   - it imports unsafe and syscall, which Yaegi does not expose to plugins by
-//     default; even with unsafe allowed, recent versions need unsafe.String,
-//     which Yaegi lacks, and a Go version newer than the Go 1.22 stdlib it exposes;
-//   - its connection pool relies on select statements, which Yaegi runs
-//     incorrectly from several goroutines (see redisClient);
-//   - it would have to be vendored: tens of thousands of lines, for HMGET,
-//     HSETEX, HPEXPIRE, HDEL, HLEN and DEL.
+// Why a hand-written client instead of github.com/redis/go-redis: Traefik runs the plugin through Yaegi v0.16.1, which cannot load go-redis
+// (checked with v9.8.0, the first with HSETEX, up to v9.23.0):
+//   - it imports unsafe and syscall, which Yaegi does not expose to plugins by default; even with unsafe allowed, recent versions need
+//     unsafe.String, which Yaegi lacks, and a Go version newer than the Go 1.22 stdlib it exposes;
+//   - its connection pool relies on select statements, which Yaegi runs incorrectly from several goroutines (see redisClient);
+//   - it would have to be vendored: tens of thousands of lines, for HMGET, HSETEX, HPEXPIRE, HDEL, HLEN and DEL.
 
 package traedis
 
@@ -29,11 +25,9 @@ import (
 const (
 	// maxLineBytes bounds RESP status lines; longer lines are a protocol error.
 	maxLineBytes = 4096
-	// maxArrayItems bounds RESP arrays: the replies to HMGET and HPEXPIRE have
-	// one item per field asked for.
+	// maxArrayItems bounds RESP arrays: the replies to HMGET and HPEXPIRE have one item per field asked for.
 	maxArrayItems = 16
-	// largeArgBytes is the size from which an argument is written as it is,
-	// instead of being copied into the command (see writeCommand).
+	// largeArgBytes is the size from which an argument is written as it is, instead of being copied into the command (see writeCommand).
 	largeArgBytes = 16 << 10
 	logInterval   = time.Minute
 )
@@ -51,31 +45,25 @@ type redisError string
 
 func (e redisError) Error() string { return "redis: " + string(e) }
 
-// redisClient is a minimal RESP2 client with a pool of at most redis.poolSize
-// connections.
-// Every operation is bounded by redis.timeout, and getting its connection by
-// redis.dialTimeout: Redis has more time to send a body than to show it is
-// there.
+// redisClient is a minimal RESP2 client with a pool of at most redis.poolSize connections. Every operation is bounded by redis.timeout, and
+// getting its connection by redis.dialTimeout: Redis has more time to send a body than to show it is there.
 //
-// The pool uses no select statement: Yaegi v0.16.1 shares the operands of a
-// select between the goroutines running it, which hands one connection to two
-// requests.
+// The pool uses no select statement: Yaegi v0.16.1 shares the operands of a select between the goroutines running it, which hands one
+// connection to two requests.
 type redisClient struct {
-	// name is the one of the middleware, which the log lines start with; out
-	// is where they go.
+	// name is the one of the middleware, which the log lines start with; out is where they go.
 	name    string
 	out     io.Writer
 	opts    redisOptions
 	maxBulk int64
 	sem     chan struct{} // one token per connection in use
-	// takeToken is the select that takes a token of sem if one is free, built
-	// once: its first case is the send to sem, its second one the default.
+	// takeToken is the select that takes a token of sem if one is free, built once: its first case is the send to sem, its second one the
+	// default.
 	takeToken []reflect.SelectCase
 	idleMu    sync.Mutex
 	idle      []*redisConn // at most redis.poolSize: only token holders add to it
-	// The breaker (see do): failures counts the commands that failed in a row,
-	// up to redis.maxFailures; from there, retryAt is when the next command
-	// may be sent, and downSince when it was reached.
+	// The breaker (see do): failures counts the commands that failed in a row, up to redis.maxFailures; from there, retryAt is when the
+	// next command may be sent, and downSince when it was reached.
 	stateMu   sync.Mutex
 	failures  int
 	retryAt   time.Time
@@ -88,8 +76,7 @@ type redisClient struct {
 type redisConn struct {
 	nc net.Conn
 	r  *bufio.Reader
-	// reused is set once the connection has been through the pool: it may have
-	// been closed since, by Redis or on the way to it.
+	// reused is set once the connection has been through the pool: it may have been closed since, by Redis or on the way to it.
 	reused bool
 }
 
@@ -97,8 +84,7 @@ type reply struct {
 	kind byte // '+', '-', ':', '*'
 	str  string
 	num  int64
-	// items holds the bulk strings of an array: nil for a null one, and for an
-	// integer.
+	// items holds the bulk strings of an array: nil for a null one, and for an integer.
 	items [][]byte
 }
 
@@ -137,8 +123,7 @@ func (c *redisClient) get(ctx context.Context, key string, fields []string) ([][
 	return r.items, nil
 }
 
-// set runs HSETEX: with replace (FXX), Redis stores none of the fields unless
-// they all exist already.
+// set runs HSETEX: with replace (FXX), Redis stores none of the fields unless they all exist already.
 func (c *redisClient) set(ctx context.Context, key string, fields []fieldValue, ttl time.Duration, replace bool) error {
 	ms := ttl.Milliseconds()
 	if ms <= 0 {
@@ -187,19 +172,16 @@ func (c *redisClient) del(ctx context.Context, key string, fields []string) erro
 	return err
 }
 
-// do runs one command, within redis.timeout, and expects a reply of the given
-// kind: any other one is errProtocol. Any failure but an error reply or a
-// reply of another kind closes the connection: its state is unknown. A command that fails on a
-// connection of the pool is run once more, on a new one (see stale).
+// do runs one command, within redis.timeout, and expects a reply of the given kind: any other one is errProtocol. Any failure but an error
+// reply or a reply of another kind closes the connection: its state is unknown. A command that fails on a connection of the pool is run
+// once more, on a new one (see stale).
 //
-// After redis.maxFailures failures in a row, Redis is given up on: commands
-// fail at once with errUnavailable, instead of making every request wait for a
-// timeout. One of them is let through every redis.retryAfter, the others
-// still failing while it runs: Redis is back when it succeeds.
+// After redis.maxFailures failures in a row, Redis is given up on: commands fail at once with errUnavailable, instead of making every
+// request wait for a timeout. One of them is let through every redis.retryAfter, the others still failing while it runs: Redis is back when
+// it succeeds.
 //
-// Like acquire, release and roundTrip, which run for every command too, it is
-// a function rather than a method of the client: under Yaegi, calling a method
-// costs several times what calling a function does.
+// Like acquire, release and roundTrip, which run for every command too, it is a function rather than a method of the client: under Yaegi,
+// calling a method costs several times what calling a function does.
 func do(ctx context.Context, c *redisClient, kind byte, args [][]byte) (reply, error) {
 	c.stateMu.Lock()
 	failures := c.failures
@@ -260,8 +242,8 @@ func do(ctx context.Context, c *redisClient, kind byte, args [][]byte) (reply, e
 	return r, nil
 }
 
-// failed counts a command that Redis did not answer, for the breaker of do.
-// Neither a full pool nor a client that went away says anything of Redis.
+// failed counts a command that Redis did not answer, for the breaker of do. Neither a full pool nor a client that went away says anything
+// of Redis.
 func (c *redisClient) failed(err error) {
 	c.logError(err)
 	if c.opts.maxFailures <= 0 || errors.Is(err, errPoolExhausted) || errors.Is(err, context.Canceled) {
@@ -292,18 +274,15 @@ func (c *redisClient) answered() {
 	c.failures = 0
 }
 
-// stale reports whether err, the failure of a command on a connection of the
-// pool, may only mean that the connection was closed while it was idle (Redis
-// restarted, a firewall dropped it): the command is then worth running again
-// on a new one, which all of ours can be. Not when Redis answered, whatever it
-// said, nor when it did not in time: there is none left.
+// stale reports whether err, the failure of a command on a connection of the pool, may only mean that the connection was closed while it
+// was idle (Redis restarted, a firewall dropped it): the command is then worth running again on a new one, which all of ours can be. Not
+// when Redis answered, whatever it said, nor when it did not in time: there is none left.
 func stale(err error) bool {
 	return !errors.Is(err, errTooLarge) && !errors.Is(err, errProtocol) && !errors.Is(err, os.ErrDeadlineExceeded)
 }
 
-// acquire returns an idle connection or dials a new one, once it has a pool
-// token. Waiting for the token and dialing are given redis.dialTimeout, which
-// a free token and an idle connection, the usual case, never need.
+// acquire returns an idle connection or dials a new one, once it has a pool token. Waiting for the token and dialing are given
+// redis.dialTimeout, which a free token and an idle connection, the usual case, never need.
 func acquire(ctx context.Context, c *redisClient) (*redisConn, error) {
 	// select { case c.sem <- struct{}{}: default: }
 	chosen, _, _ := reflect.Select(c.takeToken)
@@ -367,8 +346,7 @@ func release(c *redisClient, conn *redisConn) {
 	<-c.sem
 }
 
-// dial opens a connection and sets it up (TLS, AUTH, SELECT), until the
-// deadline of ctx.
+// dial opens a connection and sets it up (TLS, AUTH, SELECT), until the deadline of ctx.
 func (c *redisClient) dial(ctx context.Context) (*redisConn, error) {
 	var d net.Dialer
 	nc, err := d.DialContext(ctx, "tcp", c.opts.addr)
@@ -376,8 +354,7 @@ func (c *redisClient) dial(ctx context.Context) (*redisConn, error) {
 		return nil, err
 	}
 	if c.opts.tls != nil {
-		// Nothing is sent, the password least of all, before Redis is known to
-		// be the one that is meant.
+		// Nothing is sent, the password least of all, before Redis is known to be the one that is meant.
 		secured := tls.Client(nc, c.opts.tls)
 		if err := secured.HandshakeContext(ctx); err != nil {
 			_ = nc.Close()
@@ -424,8 +401,8 @@ func roundTrip(ctx context.Context, conn *redisConn, maxBulk int64, args [][]byt
 	return readReply(conn.r, maxBulk)
 }
 
-// writeCommand sends a command in one write. Its large arguments, the bodies,
-// are not copied into it: they go to the connection as they are.
+// writeCommand sends a command in one write. Its large arguments, the bodies, are not copied into it: they go to the connection as they
+// are.
 func writeCommand(nc net.Conn, args [][]byte) error {
 	size := 16
 	for _, a := range args {
@@ -461,14 +438,12 @@ func writeCommand(nc net.Conn, args [][]byte) error {
 	return err
 }
 
-// readReply reads one RESP2 reply: a status, an error, an integer, or an array
-// of bulk strings and integers, which is all that our commands get. The server
-// is not trusted: line lengths and array lengths are bounded, and bulk lengths
-// are checked against maxBulk before allocating.
+// readReply reads one RESP2 reply: a status, an error, an integer, or an array of bulk strings and integers, which is all that our commands
+// get. The server is not trusted: line lengths and array lengths are bounded, and bulk lengths are checked against maxBulk before
+// allocating.
 //
-// It is one loop over the lines of the reply, the first one then one per item
-// of an array, rather than a function called for each value: under Yaegi, the
-// calls would cost more than the parsing.
+// It is one loop over the lines of the reply, the first one then one per item of an array, rather than a function called for each value:
+// under Yaegi, the calls would cost more than the parsing.
 func readReply(r *bufio.Reader, maxBulk int64) (reply, error) {
 	var out reply
 	for i := -1; i < len(out.items); i++ {
@@ -486,8 +461,7 @@ func readReply(r *bufio.Reader, maxBulk int64) (reply, error) {
 		payload := string(line[1 : len(line)-2])
 
 		if i >= 0 {
-			// An item of the array: nothing is kept of an integer, nor of a
-			// null bulk string.
+			// An item of the array: nothing is kept of an integer, nor of a null bulk string.
 			if kind == ':' || (kind == '$' && payload == "-1") {
 				continue
 			}
@@ -532,8 +506,7 @@ func readReply(r *bufio.Reader, maxBulk int64) (reply, error) {
 	return out, nil
 }
 
-// logError reports Redis failures at most once per logInterval, with the number
-// of errors since the last report. It never logs the DSN.
+// logError reports Redis failures at most once per logInterval, with the number of errors since the last report. It never logs the DSN.
 func (c *redisClient) logError(err error) {
 	c.logMu.Lock()
 	defer c.logMu.Unlock()
@@ -547,8 +520,8 @@ func (c *redisClient) logError(err error) {
 	c.logCount = 0
 }
 
-// logf writes a line to out, the log of Traefik: it starts with the name of
-// the middleware, which tells its Redis and its routers from the others.
+// logf writes a line to out, the log of Traefik: it starts with the name of the middleware, which tells its Redis and its routers from the
+// others.
 func logf(out io.Writer, name, format string, args ...any) {
 	_, _ = fmt.Fprintf(out, "traedis: "+name+": "+format+"\n", args...)
 }

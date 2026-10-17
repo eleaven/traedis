@@ -122,12 +122,18 @@ func (m *memStore) lookup(key, field string) (memValue, bool) {
 	return v, ok
 }
 
-// put stores e in field of key the way the cache does, in one write: its entry
-// and its body, with the marker of the key when it is given one. The size and
-// the freshness of e are worked out from its body and its header.
+// put stores e in field of key the way the cache does, in one write: its entry and its body, with the marker of the key when it is given
+// one. The size and the freshness of e are worked out from its body and its header.
 func (m *memStore) put(key, field string, e *entry, marker []byte, ttl time.Duration) error {
 	cc := parseCacheControl(e.header.Values("Cache-Control"))
-	stored := &entry{status: e.status, header: e.header, size: int64(len(e.body)), requestTime: e.requestTime, responseTime: e.responseTime, vary: e.vary}
+	stored := &entry{
+		status:       e.status,
+		header:       e.header,
+		size:         int64(len(e.body)),
+		requestTime:  e.requestTime,
+		responseTime: e.responseTime,
+		vary:         e.vary,
+	}
 	setFreshness(stored, cc)
 	var fields []fieldValue
 	if marker != nil {

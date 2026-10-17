@@ -5,28 +5,23 @@ import (
 	"sync"
 )
 
-// smallBody is the size up to which a body held in memory does not count in
-// the budget: no more than what Traefik buffers to proxy a response anyway.
+// smallBody is the size up to which a body held in memory does not count in the budget: no more than what Traefik buffers to proxy a
+// response anyway.
 const smallBody = 32 << 10
 
-// budget bounds the bodies a middleware holds in memory at once, for all its
-// requests: the copies of responses to store (see recorder), and the stored
-// bodies being sent (see holdBody). Without it, clients would choose how much
-// memory Traefik uses: many slow requests for large responses, each one held
-// in full. A body larger than smallBody takes its size from it, until it is
-// let go; past maxBufferedBytes, a response is not copied (it is sent, but not
-// stored), nor sent from the cache (the request is forwarded).
+// budget bounds the bodies a middleware holds in memory at once, for all its requests: the copies of responses to store (see recorder), and
+// the stored bodies being sent (see holdBody). Without it, clients would choose how much memory Traefik uses: many slow requests for large
+// responses, each one held in full. A body larger than smallBody takes its size from it, until it is let go; past maxBufferedBytes, a
+// response is not copied (it is sent, but not stored), nor sent from the cache (the request is forwarded).
 //
-// Its functions are not methods: under Yaegi, calling a method costs several
-// times what calling a function does.
+// Its functions are not methods: under Yaegi, calling a method costs several times what calling a function does.
 type budget struct {
 	mu   sync.Mutex
 	used int64
 	max  int64
 }
 
-// takeBytes takes n bytes from b, and reports whether it had them. A nil
-// budget has no bound.
+// takeBytes takes n bytes from b, and reports whether it had them. A nil budget has no bound.
 func takeBytes(b *budget, n int64) bool {
 	if b == nil {
 		return true
@@ -50,11 +45,9 @@ func giveBytes(b *budget, n int64) {
 	b.mu.Unlock()
 }
 
-// holdBody takes the size of the body of e from b, when the answer to r sends
-// it and it is not small, unless e holds it already: before the body is read
-// from the store, or once it was read along with its entry. It reports
-// whether it could: otherwise, the body is not to be read nor sent. letGo
-// gives it back.
+// holdBody takes the size of the body of e from b, when the answer to r sends it and it is not small, unless e holds it already: before the
+// body is read from the store, or once it was read along with its entry. It reports whether it could: otherwise, the body is not to be read
+// nor sent. letGo gives it back.
 func holdBody(b *budget, r *http.Request, e *entry) bool {
 	if e.held > 0 || e.size <= smallBody || !sendsBody(r, e) {
 		return true
@@ -74,11 +67,9 @@ func letGo(b *budget, e *entry) {
 	}
 }
 
-// holdCopy makes the copy of rec hold size bytes of its budget, once it is
-// larger than smallBody. It reports whether it could: otherwise, the response
-// is not to be copied any more. A copy of unknown length, which grows write
-// after write, takes as much again as it holds, up to max: not a lock and a
-// call per write. Only what it needs when the budget has no more room.
+// holdCopy makes the copy of rec hold size bytes of its budget, once it is larger than smallBody. It reports whether it could: otherwise,
+// the response is not to be copied any more. A copy of unknown length, which grows write after write, takes as much again as it holds, up
+// to max: not a lock and a call per write. Only what it needs when the budget has no more room.
 func holdCopy(rec *recorder, size int64) bool {
 	if size <= smallBody || size <= rec.held {
 		return true

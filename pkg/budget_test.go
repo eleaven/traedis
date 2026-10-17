@@ -63,8 +63,7 @@ func TestHoldCopy(t *testing.T) {
 	})
 }
 
-// A copy that stops is given back at once, not when its response ends: that
-// may be long after, for a stream.
+// A copy that stops is given back at once, not when its response ends: that may be long after, for a stream.
 func TestStoppedCopyIsGivenBack(t *testing.T) {
 	rec := newRecorder(httptest.NewRecorder(), &hookStub{capture: true}, 100<<10, &budget{max: 1 << 20})
 	chunk := []byte(strings.Repeat("x", 40<<10))
@@ -79,8 +78,7 @@ func TestStoppedCopyIsGivenBack(t *testing.T) {
 	}
 }
 
-// fill takes what is left of the budget of c, as other requests would. The
-// returned function gives it back.
+// fill takes what is left of the budget of c, as other requests would. The returned function gives it back.
 func fill(c *cache) func() {
 	c.bodies.mu.Lock()
 	n := c.bodies.max - c.bodies.used
@@ -126,11 +124,13 @@ func TestCopyOverBudgetIsNotStored(t *testing.T) {
 	}
 }
 
-// A copy that is not stored gives back what it held: incomplete, or not
-// written because a write to its key is running.
+// A copy that is not stored gives back what it held: incomplete, or not written because a write to its key is running.
 func TestCopyNotStoredIsGivenBack(t *testing.T) {
 	t.Run("incomplete", func(t *testing.T) {
-		b := &backend{header: http.Header{"Cache-Control": {"max-age=60"}, "Content-Length": {strconv.Itoa(len(largeBody) + 1)}}, body: largeBody}
+		b := &backend{
+			header: http.Header{"Cache-Control": {"max-age=60"}, "Content-Length": {strconv.Itoa(len(largeBody) + 1)}},
+			body:   largeBody,
+		}
 		c, st := newTestCache(t, b, nil)
 		doRequest(c, http.MethodGet, testURL, nil)
 		if st.sets != 0 {
@@ -175,13 +175,20 @@ func TestHitOverBudgetIsForwarded(t *testing.T) {
 			method = http.MethodGet
 		}
 		stored := st.entry(cacheKey(testURL), "")
-		storeEntry(t, st, testURL, &entry{status: 200, header: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"x"`}}, body: []byte(largeBody), requestTime: stored.requestTime, responseTime: stored.responseTime})
+		storeEntry(t, st, testURL, &entry{
+			status:       200,
+			header:       http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"x"`}},
+			body:         []byte(largeBody),
+			requestTime:  stored.requestTime,
+			responseTime: stored.responseTime,
+		})
 		if rec := doRequest(c, method, testURL, hdr); !strings.HasPrefix(lastCacheStatus(rec), "traedis; hit") {
 			t.Errorf("%s %v: Cache-Status = %q", method, hdr, lastCacheStatus(rec))
 		}
 	}
 	release()
-	if rec := doRequest(c, http.MethodGet, testURL, nil); !strings.HasPrefix(lastCacheStatus(rec), "traedis; hit") || rec.Body.String() != largeBody {
+	if rec := doRequest(c, http.MethodGet, testURL, nil); !strings.HasPrefix(lastCacheStatus(rec), "traedis; hit") ||
+		rec.Body.String() != largeBody {
 		t.Errorf("once there is room again: Cache-Status = %q", lastCacheStatus(rec))
 	}
 	checkBudgetEmpty(t, c)
@@ -202,7 +209,13 @@ func TestSmallHitIsNotCounted(t *testing.T) {
 func TestBudgetGivenBack(t *testing.T) {
 	stale := func(cacheControl string) *entry {
 		at := time.Now().Add(-70 * time.Second)
-		return &entry{status: 200, header: http.Header{"Cache-Control": {cacheControl}, "Etag": {`"x"`}}, body: []byte(largeBody), requestTime: at, responseTime: at}
+		return &entry{
+			status:       200,
+			header:       http.Header{"Cache-Control": {cacheControl}, "Etag": {`"x"`}},
+			body:         []byte(largeBody),
+			requestTime:  at,
+			responseTime: at,
+		}
 	}
 	tests := []struct {
 		name    string
@@ -212,15 +225,20 @@ func TestBudgetGivenBack(t *testing.T) {
 		want    string
 	}{
 		{name: "stale-while-revalidate", stored: stale("max-age=60, stale-while-revalidate=30"),
-			backend: &backend{header: http.Header{"Cache-Control": {"max-age=60"}}, body: largeBody}, want: "traedis; hit; ttl=-"},
+			backend: &backend{header: http.Header{"Cache-Control": {"max-age=60"}}, body: largeBody},
+			want:    "traedis; hit; ttl=-"},
 		{name: "validated by a 304", stored: stale("max-age=60"),
-			backend: &backend{status: 304, header: http.Header{"Etag": {`"x"`}, "Cache-Control": {"max-age=60"}}}, want: "traedis; fwd=stale; fwd-status=304; ttl="},
+			backend: &backend{status: 304, header: http.Header{"Etag": {`"x"`}, "Cache-Control": {"max-age=60"}}},
+			want:    "traedis; fwd=stale; fwd-status=304; ttl="},
 		{name: "validated by a 304, read again", stored: stale("max-age=60"), reqHdr: http.Header{"If-None-Match": {`"y"`}},
-			backend: &backend{status: 304, header: http.Header{"Etag": {`"x"`}, "Cache-Control": {"max-age=60"}}}, want: "traedis; fwd=stale; fwd-status=304; ttl="},
+			backend: &backend{status: 304, header: http.Header{"Etag": {`"x"`}, "Cache-Control": {"max-age=60"}}},
+			want:    "traedis; fwd=stale; fwd-status=304; ttl="},
 		{name: "stale-if-error", stored: stale("max-age=60, stale-if-error=30"),
-			backend: &backend{status: 503}, want: "traedis; fwd=stale; fwd-status=503; ttl=-"},
+			backend: &backend{status: 503},
+			want:    "traedis; fwd=stale; fwd-status=503; ttl=-"},
 		{name: "replaced", stored: stale("max-age=60"),
-			backend: &backend{header: http.Header{"Cache-Control": {"max-age=60"}}, body: largeBody + "y"}, want: "traedis; fwd=stale; fwd-status=200"},
+			backend: &backend{header: http.Header{"Cache-Control": {"max-age=60"}}, body: largeBody + "y"},
+			want:    "traedis; fwd=stale; fwd-status=200"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -241,11 +259,9 @@ func TestBudgetGivenBack(t *testing.T) {
 	}
 }
 
-// The proxy of Traefik panics with http.ErrAbortHandler when it cannot read all
-// the body of the backend, which a client that goes away causes: what the
-// request held of the budget must be given back all the same. Otherwise a few
-// aborted downloads would hold all of it, and the cache would be bypassed for
-// good.
+// The proxy of Traefik panics with http.ErrAbortHandler when it cannot read all the body of the backend, which a client that goes away
+// causes: what the request held of the budget must be given back all the same. Otherwise a few aborted downloads would hold all of it, and
+// the cache would be bypassed for good.
 func TestBudgetGivenBackOnPanic(t *testing.T) {
 	tests := []struct {
 		name   string

@@ -22,12 +22,11 @@ import (
 	"time"
 )
 
-// echoKey, as a reply, answers a command with its key, as the value of the one
-// field it asks for.
+// echoKey, as a reply, answers a command with its key, as the value of the one field it asks for.
 const echoKey = "echo-key"
 
-// fakeRedis is a scripted RESP server: replies maps a command name to its raw
-// reply (defaultReplies otherwise); an empty reply means never answering.
+// fakeRedis is a scripted RESP server: replies maps a command name to its raw reply (defaultReplies otherwise); an empty reply means never
+// answering.
 type fakeRedis struct {
 	ln      net.Listener
 	replies map[string]string
@@ -59,9 +58,8 @@ func newFakeRedis(t *testing.T, replies map[string]string) *fakeRedis {
 	return serveFakeRedis(t, ln, replies)
 }
 
-// newFakeRedisTLS is a fakeRedis that only talks TLS, and the PEM of the
-// authority of its certificate: the one of httptest, valid for 127.0.0.1 and
-// example.com.
+// newFakeRedisTLS is a fakeRedis that only talks TLS, and the PEM of the authority of its certificate: the one of httptest, valid for
+// 127.0.0.1 and example.com.
 func newFakeRedisTLS(t *testing.T, replies map[string]string) (*fakeRedis, string) {
 	t.Helper()
 	srv := httptest.NewUnstartedServer(http.NotFoundHandler())
@@ -194,7 +192,10 @@ func readCommand(r *bufio.Reader) ([]string, error) {
 }
 
 func testClient(f *fakeRedis) *redisClient {
-	return newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}, 1024)
+	return newRedisClient(
+		"cache@file",
+		redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}, 1024,
+	)
 }
 
 // getField reads one field of key: nil when it is not there.
@@ -247,8 +248,7 @@ func TestRedisGetAndSet(t *testing.T) {
 	}
 }
 
-// The fields of a response are read in one round trip: a field that is not
-// there is nil, which an empty one is not.
+// The fields of a response are read in one round trip: a field that is not there is nil, which an empty one is not.
 func TestRedisGetSeveralFields(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HMGET": "*3\r\n$5\r\nentry\r\n$-1\r\n$0\r\n\r\n"})
 	values, err := testClient(f).get(context.Background(), "traedis:k", []string{"", "f1", "f1:body"})
@@ -280,7 +280,8 @@ func TestRedisSetSeveralFields(t *testing.T) {
 	c := testClient(f)
 	ctx := context.Background()
 
-	if err := c.set(ctx, "traedis:k", fieldValues("", "marker", "f1", "v\r\n1", "f1:body", "body"), 1500*time.Millisecond, false); err != nil {
+	fields := fieldValues("", "marker", "f1", "v\r\n1", "f1:body", "body")
+	if err := c.set(ctx, "traedis:k", fields, 1500*time.Millisecond, false); err != nil {
 		t.Fatalf("set() = %v", err)
 	}
 	if err := c.set(ctx, "traedis:k", fieldValues("", "marker", "f1", "v2"), time.Second, true); err != nil {
@@ -306,13 +307,13 @@ func TestRedisSetSeveralFields(t *testing.T) {
 	}
 }
 
-// A body is written to the connection as it is, not copied into the command:
-// what Redis gets is the same.
+// A body is written to the connection as it is, not copied into the command: what Redis gets is the same.
 func TestRedisSetLargeValue(t *testing.T) {
 	f := newFakeRedis(t, nil)
 	body := strings.Repeat("0123456789abcdef", 4<<10) // 64 KiB
 	for _, value := range []string{body, body[:largeArgBytes], body[:largeArgBytes-1], ""} {
-		if err := testClient(f).set(context.Background(), "traedis:k", fieldValues("", "entry", ":body", value), time.Second, false); err != nil {
+		fields := fieldValues("", "entry", ":body", value)
+		if err := testClient(f).set(context.Background(), "traedis:k", fields, time.Second, false); err != nil {
 			t.Fatalf("set() = %v", err)
 		}
 		cmds := f.received()
@@ -390,7 +391,11 @@ func TestRedisDialSendsAuthAndSelect(t *testing.T) {
 		opts redisOptions
 		want []string
 	}{
-		{name: "ACL user and database", opts: redisOptions{username: "u", password: "p", db: 15}, want: []string{"AUTH u p", "SELECT 15", "HMGET k "}},
+		{
+			name: "ACL user and database",
+			opts: redisOptions{username: "u", password: "p", db: 15},
+			want: []string{"AUTH u p", "SELECT 15", "HMGET k "},
+		},
 		{name: "password only", opts: redisOptions{password: "p"}, want: []string{"AUTH p", "HMGET k "}},
 		{name: "no credentials, database 0", opts: redisOptions{}, want: []string{"HMGET k "}},
 	}
@@ -417,8 +422,7 @@ func TestRedisDialSendsAuthAndSelect(t *testing.T) {
 	}
 }
 
-// tlsClient is a client of f configured as Traefik would: with a DSN for the
-// given host and redis.tls.
+// tlsClient is a client of f configured as Traefik would: with a DSN for the given host and redis.tls.
 func tlsClient(t *testing.T, f *fakeRedis, scheme, host string, tlsConfig RedisTLSConfig) *redisClient {
 	t.Helper()
 	_, port, err := net.SplitHostPort(f.ln.Addr().String())
@@ -453,7 +457,13 @@ func TestRedisTLS(t *testing.T) {
 		{name: "redis.tls.ca as PEM", scheme: "rediss", host: "127.0.0.1", tls: RedisTLSConfig{CA: ca}, ok: true},
 		{name: "unknown authority", scheme: "rediss", host: "127.0.0.1"},
 		{name: "certificate of another host", scheme: "rediss", host: "localhost", tls: RedisTLSConfig{CA: ca}},
-		{name: "redis.tls.insecureSkipVerify", scheme: "rediss", host: "localhost", tls: RedisTLSConfig{InsecureSkipVerify: true}, ok: true},
+		{
+			name:   "redis.tls.insecureSkipVerify",
+			scheme: "rediss",
+			host:   "localhost",
+			tls:    RedisTLSConfig{InsecureSkipVerify: true},
+			ok:     true,
+		},
 		{name: "redis:// to a Redis that wants TLS", scheme: "redis", host: "127.0.0.1"},
 	}
 	for _, tt := range tests {
@@ -490,8 +500,7 @@ func TestRedisTLS(t *testing.T) {
 	}
 }
 
-// A Redis without TLS does not answer the handshake: no longer than
-// redis.dialTimeout.
+// A Redis without TLS does not answer the handshake: no longer than redis.dialTimeout.
 func TestRedisTLSToPlainRedis(t *testing.T) {
 	f := newFakeRedis(t, nil)
 	c := tlsClient(t, f, "rediss", "127.0.0.1", RedisTLSConfig{InsecureSkipVerify: true})
@@ -507,7 +516,13 @@ func TestRedisTLSToPlainRedis(t *testing.T) {
 
 func TestRedisAuthFailure(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"AUTH": "-WRONGPASS invalid username-password pair\r\n"})
-	opts := redisOptions{poolSize: 10, addr: f.ln.Addr().String(), password: "s3cret", dialTimeout: 200 * time.Millisecond, timeout: 200 * time.Millisecond}
+	opts := redisOptions{
+		poolSize:    10,
+		addr:        f.ln.Addr().String(),
+		password:    "s3cret",
+		dialTimeout: 200 * time.Millisecond,
+		timeout:     200 * time.Millisecond,
+	}
 	_, err := getField(newRedisClient("cache@file", opts, 1024), "k", "")
 	if err == nil {
 		t.Fatal("expected an error")
@@ -565,8 +580,7 @@ func TestRedisUntrustedReplies(t *testing.T) {
 				t.Fatalf("first get() = %q, %v, want no value and %v", v, err, tt.wantErr)
 			}
 			_, _ = getField(c, "k", "")
-			// After a reply that was not read to its end, the connection is
-			// not reused.
+			// After a reply that was not read to its end, the connection is not reused.
 			want := 2
 			if tt.kept {
 				want = 1
@@ -580,7 +594,10 @@ func TestRedisUntrustedReplies(t *testing.T) {
 
 func TestRedisTimeout(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HMGET": ""})
-	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient(
+		"cache@file",
+		redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024,
+	)
 	start := time.Now()
 	if _, err := getField(c, "k", ""); err == nil {
 		t.Fatal("expected a timeout")
@@ -590,12 +607,14 @@ func TestRedisTimeout(t *testing.T) {
 	}
 }
 
-// redis.timeout is for the whole operation: a reply may take longer than
-// redis.dialTimeout, which is only for getting the connection.
+// redis.timeout is for the whole operation: a reply may take longer than redis.dialTimeout, which is only for getting the connection.
 func TestRedisSlowReply(t *testing.T) {
 	f := newFakeRedis(t, nil)
 	f.delay = 100 * time.Millisecond
-	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 20 * time.Millisecond, timeout: 5 * time.Second}, 1024)
+	c := newRedisClient(
+		"cache@file",
+		redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 20 * time.Millisecond, timeout: 5 * time.Second}, 1024,
+	)
 	for i := 0; i < 2; i++ { // on a new connection, then on the idle one
 		if v, err := getField(c, "k", ""); err != nil || string(v) != "hello" {
 			t.Fatalf("get() = %q, %v", v, err)
@@ -606,7 +625,13 @@ func TestRedisSlowReply(t *testing.T) {
 // Setting up a new connection is part of getting it.
 func TestRedisDialTimeout(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"AUTH": ""})
-	opts := redisOptions{poolSize: 10, addr: f.ln.Addr().String(), password: "p", dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}
+	opts := redisOptions{
+		poolSize:    10,
+		addr:        f.ln.Addr().String(),
+		password:    "p",
+		dialTimeout: 50 * time.Millisecond,
+		timeout:     5 * time.Second,
+	}
 	c := newRedisClient("cache@file", opts, 1024)
 	start := time.Now()
 	if _, err := getField(c, "k", ""); err == nil {
@@ -620,8 +645,7 @@ func TestRedisDialTimeout(t *testing.T) {
 	}
 }
 
-// A connection of the pool that was closed while idle does not cost a bypass:
-// the command is run again on a new one.
+// A connection of the pool that was closed while idle does not cost a bypass: the command is run again on a new one.
 func TestRedisRetriesOnAStaleConnection(t *testing.T) {
 	f := newFakeRedis(t, nil)
 	c := testClient(f)
@@ -665,7 +689,10 @@ func TestRedisRetryFails(t *testing.T) {
 // A reply that does not come in time is not waited for twice.
 func TestRedisTimeoutIsNotRetried(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HLEN": ""})
-	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient(
+		"cache@file",
+		redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024,
+	)
 	if _, err := getField(c, "k", ""); err != nil {
 		t.Fatal(err)
 	}
@@ -685,9 +712,8 @@ func breakerClient(f *fakeRedis) *redisClient {
 	}, 1024)
 }
 
-// After redis.maxFailures failures in a row, Redis is no longer asked: the
-// commands fail at once. One is sent every redis.retryAfter, and all of them
-// again once it is answered.
+// After redis.maxFailures failures in a row, Redis is no longer asked: the commands fail at once. One is sent every redis.retryAfter, and
+// all of them again once it is answered.
 func TestRedisBreaker(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HMGET": "?broken\r\n"})
 	c := breakerClient(f)
@@ -729,8 +755,7 @@ func TestRedisBreaker(t *testing.T) {
 	}
 }
 
-// While the command that tries Redis again waits for its reply, the others
-// still fail at once.
+// While the command that tries Redis again waits for its reply, the others still fail at once.
 func TestRedisBreakerTriesOneCommand(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HMGET": "?broken\r\n"})
 	c := breakerClient(f)
@@ -779,8 +804,7 @@ func (b *lockedBuffer) lines() []string {
 	return strings.Split(strings.TrimSuffix(b.buf.String(), "\n"), "\n")
 }
 
-// The log tells which middleware lost its Redis, when it is given up on and
-// when it is back: once each, whatever the number of requests.
+// The log tells which middleware lost its Redis, when it is given up on and when it is back: once each, whatever the number of requests.
 func TestRedisLog(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{"HMGET": "?broken\r\n"})
 	c := breakerClient(f)
@@ -801,7 +825,8 @@ func TestRedisLog(t *testing.T) {
 	lines := log.lines()
 	want := []string{
 		"traedis: cache@file: redis error, bypassing the cache (1 errors since last report): redis: protocol error",
-		"traedis: cache@file: redis: no answer to 3 commands in a row: the cache is bypassed, and Redis tried again every 100ms: redis: protocol error",
+		"traedis: cache@file: redis: no answer to 3 commands in a row: the cache is bypassed, " +
+			"and Redis tried again every 100ms: redis: protocol error",
 		"traedis: cache@file: redis: answers again after ",
 	}
 	if len(lines) != len(want) {
@@ -817,8 +842,8 @@ func TestRedisLog(t *testing.T) {
 	}
 }
 
-// Only failures in a row count, and only those of Redis: an error reply and a
-// value that is too large are answers, a full pool says nothing of it.
+// Only failures in a row count, and only those of Redis: an error reply and a value that is too large are answers, a full pool says nothing
+// of it.
 func TestRedisBreakerStaysClosed(t *testing.T) {
 	f := newFakeRedis(t, map[string]string{
 		"HLEN":   "?broken\r\n",
@@ -864,7 +889,10 @@ func TestRedisBreakerDisabled(t *testing.T) {
 
 func TestRedisPoolExhausted(t *testing.T) {
 	f := newFakeRedis(t, nil)
-	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}, 1024)
+	c := newRedisClient(
+		"cache@file",
+		redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 50 * time.Millisecond, timeout: 5 * time.Second}, 1024,
+	)
 	for i := 0; i < cap(c.sem); i++ {
 		c.sem <- struct{}{}
 	}
@@ -882,7 +910,9 @@ func TestRedisPoolExhausted(t *testing.T) {
 
 func TestRedisPoolWaitsForAConnection(t *testing.T) {
 	f := newFakeRedis(t, nil)
-	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 2 * time.Second, timeout: 2 * time.Second}, 1024)
+	c := newRedisClient(
+		"cache@file", redisOptions{poolSize: 10, addr: f.ln.Addr().String(), dialTimeout: 2 * time.Second, timeout: 2 * time.Second}, 1024,
+	)
 	for i := 0; i < cap(c.sem); i++ {
 		c.sem <- struct{}{}
 	}
@@ -899,13 +929,14 @@ func TestRedisPoolWaitsForAConnection(t *testing.T) {
 	}
 }
 
-// Regression test, failing under `yaegi test` only: Yaegi v0.16.1 shares the
-// operands of a select statement between the goroutines running it, so the pool
-// handed one connection to two requests, which read each other's replies.
+// Regression test, failing under `yaegi test` only: Yaegi v0.16.1 shares the operands of a select statement between the goroutines running
+// it, so the pool handed one connection to two requests, which read each other's replies.
 func TestRedisPoolConcurrency(t *testing.T) {
 	const workers, rounds = 32, 100
 	f := newFakeRedis(t, map[string]string{"HMGET": echoKey})
-	c := newRedisClient("cache@file", redisOptions{poolSize: 4, addr: f.ln.Addr().String(), dialTimeout: 5 * time.Second, timeout: 5 * time.Second}, 1024)
+	c := newRedisClient(
+		"cache@file", redisOptions{poolSize: 4, addr: f.ln.Addr().String(), dialTimeout: 5 * time.Second, timeout: 5 * time.Second}, 1024,
+	)
 
 	failures := make(chan string, workers)
 	var wg sync.WaitGroup
@@ -940,7 +971,9 @@ func TestRedisUnreachable(t *testing.T) {
 	addr := ln.Addr().String()
 	_ = ln.Close()
 
-	c := newRedisClient("cache@file", redisOptions{poolSize: 10, addr: addr, dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024)
+	c := newRedisClient(
+		"cache@file", redisOptions{poolSize: 10, addr: addr, dialTimeout: 50 * time.Millisecond, timeout: 50 * time.Millisecond}, 1024,
+	)
 	if _, err := getField(c, "k", ""); err == nil {
 		t.Fatal("expected an error")
 	}
@@ -1051,8 +1084,7 @@ func TestRedisIntegrationDel(t *testing.T) {
 	}
 }
 
-// What a 304 does to a stored response: its entry is written again, and its
-// body is kept for as long.
+// What a 304 does to a stored response: its entry is written again, and its body is kept for as long.
 func TestRedisIntegrationExpire(t *testing.T) {
 	c := integrationClient(t)
 	ctx := context.Background()

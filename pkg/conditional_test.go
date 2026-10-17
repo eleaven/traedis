@@ -25,25 +25,95 @@ func TestNotModified(t *testing.T) {
 		want bool
 	}{
 		{name: "no condition", req: http.Header{}, resp: http.Header{"Etag": {`"v1"`}}},
-		{name: "RFC 9110 §13.1.2 same entity tag", req: http.Header{"If-None-Match": {`"v1"`}}, resp: http.Header{"Etag": {`"v1"`}}, want: true},
+		{
+			name: "RFC 9110 §13.1.2 same entity tag",
+			req:  http.Header{"If-None-Match": {`"v1"`}},
+			resp: http.Header{"Etag": {`"v1"`}},
+			want: true,
+		},
 		{name: "RFC 9110 §13.1.2 another entity tag", req: http.Header{"If-None-Match": {`"v0"`}}, resp: http.Header{"Etag": {`"v1"`}}},
-		{name: "RFC 9110 §13.1.2 one of a list", req: http.Header{"If-None-Match": {`"v0", "v1"`}}, resp: http.Header{"Etag": {`"v1"`}}, want: true},
-		{name: "RFC 9110 §13.1.2 one of several lines", req: http.Header{"If-None-Match": {`"v0"`, `"v1"`}}, resp: http.Header{"Etag": {`"v1"`}}, want: true},
+		{
+			name: "RFC 9110 §13.1.2 one of a list",
+			req:  http.Header{"If-None-Match": {`"v0", "v1"`}},
+			resp: http.Header{"Etag": {`"v1"`}},
+			want: true,
+		},
+		{
+			name: "RFC 9110 §13.1.2 one of several lines",
+			req:  http.Header{"If-None-Match": {`"v0"`, `"v1"`}},
+			resp: http.Header{"Etag": {`"v1"`}},
+			want: true,
+		},
 		{name: "RFC 9110 §13.1.2 * is any response", req: http.Header{"If-None-Match": {"*"}}, resp: http.Header{}, want: true},
-		{name: "RFC 9110 §8.8.3.2 weak comparison: weak request tag", req: http.Header{"If-None-Match": {`W/"v1"`}}, resp: http.Header{"Etag": {`"v1"`}}, want: true},
-		{name: "RFC 9110 §8.8.3.2 weak comparison: weak response tag", req: http.Header{"If-None-Match": {`"v1"`}}, resp: http.Header{"Etag": {`W/"v1"`}}, want: true},
+		{
+			name: "RFC 9110 §8.8.3.2 weak comparison: weak request tag",
+			req:  http.Header{"If-None-Match": {`W/"v1"`}},
+			resp: http.Header{"Etag": {`"v1"`}},
+			want: true,
+		},
+		{
+			name: "RFC 9110 §8.8.3.2 weak comparison: weak response tag",
+			req:  http.Header{"If-None-Match": {`"v1"`}},
+			resp: http.Header{"Etag": {`W/"v1"`}},
+			want: true,
+		},
 		{name: "a comma inside an entity tag", req: http.Header{"If-None-Match": {`"a,b", "c"`}}, resp: http.Header{"Etag": {`"a"`}}},
-		{name: "an entity tag with a comma", req: http.Header{"If-None-Match": {`"a,b", "c"`}}, resp: http.Header{"Etag": {`"a,b"`}}, want: true},
+		{
+			name: "an entity tag with a comma",
+			req:  http.Header{"If-None-Match": {`"a,b", "c"`}},
+			resp: http.Header{"Etag": {`"a,b"`}},
+			want: true,
+		},
 		{name: "response without entity tag", req: http.Header{"If-None-Match": {`"v1"`}}, resp: http.Header{}},
-		{name: "RFC 9110 §13.1.3 If-Modified-Since is ignored with If-None-Match", req: http.Header{"If-None-Match": {`"v0"`}, "If-Modified-Since": {after}}, resp: http.Header{"Etag": {`"v1"`}, "Last-Modified": {lastModified}}},
-		{name: "RFC 9110 §13.1.3 not modified since", req: http.Header{"If-Modified-Since": {lastModified}}, resp: http.Header{"Last-Modified": {lastModified}}, want: true},
-		{name: "RFC 9110 §13.1.3 a later date", req: http.Header{"If-Modified-Since": {after}}, resp: http.Header{"Last-Modified": {lastModified}}, want: true},
-		{name: "RFC 9110 §13.1.3 modified since", req: http.Header{"If-Modified-Since": {before}}, resp: http.Header{"Last-Modified": {lastModified}}},
-		{name: "RFC 9110 §13.1.3 invalid date", req: http.Header{"If-Modified-Since": {"yesterday"}}, resp: http.Header{"Last-Modified": {lastModified}}},
-		{name: "RFC 9110 §13.1.3 several dates", req: http.Header{"If-Modified-Since": {after, after}}, resp: http.Header{"Last-Modified": {lastModified}}},
-		{name: "§4.3.2 Date when there is no Last-Modified", req: http.Header{"If-Modified-Since": {lastModified}}, resp: http.Header{"Date": {lastModified}}, want: true},
-		{name: "§4.3.2 generated after the date", req: http.Header{"If-Modified-Since": {before}}, resp: http.Header{"Date": {lastModified}}},
-		{name: "§4.3.2 received time when there is no Date", req: http.Header{"If-Modified-Since": {lastModified}}, resp: http.Header{}, want: true},
+		{
+			name: "RFC 9110 §13.1.3 If-Modified-Since is ignored with If-None-Match",
+			req:  http.Header{"If-None-Match": {`"v0"`}, "If-Modified-Since": {after}},
+			resp: http.Header{"Etag": {`"v1"`}, "Last-Modified": {lastModified}},
+		},
+		{
+			name: "RFC 9110 §13.1.3 not modified since",
+			req:  http.Header{"If-Modified-Since": {lastModified}},
+			resp: http.Header{"Last-Modified": {lastModified}},
+			want: true,
+		},
+		{
+			name: "RFC 9110 §13.1.3 a later date",
+			req:  http.Header{"If-Modified-Since": {after}},
+			resp: http.Header{"Last-Modified": {lastModified}},
+			want: true,
+		},
+		{
+			name: "RFC 9110 §13.1.3 modified since",
+			req:  http.Header{"If-Modified-Since": {before}},
+			resp: http.Header{"Last-Modified": {lastModified}},
+		},
+		{
+			name: "RFC 9110 §13.1.3 invalid date",
+			req:  http.Header{"If-Modified-Since": {"yesterday"}},
+			resp: http.Header{"Last-Modified": {lastModified}},
+		},
+		{
+			name: "RFC 9110 §13.1.3 several dates",
+			req:  http.Header{"If-Modified-Since": {after, after}},
+			resp: http.Header{"Last-Modified": {lastModified}},
+		},
+		{
+			name: "§4.3.2 Date when there is no Last-Modified",
+			req:  http.Header{"If-Modified-Since": {lastModified}},
+			resp: http.Header{"Date": {lastModified}},
+			want: true,
+		},
+		{
+			name: "§4.3.2 generated after the date",
+			req:  http.Header{"If-Modified-Since": {before}},
+			resp: http.Header{"Date": {lastModified}},
+		},
+		{
+			name: "§4.3.2 received time when there is no Date",
+			req:  http.Header{"If-Modified-Since": {lastModified}},
+			resp: http.Header{},
+			want: true,
+		},
 		{name: "§4.3.2 received after the date", req: http.Header{"If-Modified-Since": {before}}, resp: http.Header{}},
 	}
 	for _, tt := range tests {
@@ -92,12 +162,44 @@ func TestBackendRequest(t *testing.T) {
 		wantIMS    string
 	}{
 		{name: "§4.3.2 no stored response: the request as it is", reqHdr: conditions, wantINM: `"v0"`, wantIMS: lastModified},
-		{name: "§4.3.2 stored response without validators: the request as it is", reqHdr: conditions, stored: &entry{header: http.Header{}}, wantINM: `"v0"`, wantIMS: lastModified},
-		{name: "RFC 9110 §13.2.1 no conditional HEAD: the request as it is", method: http.MethodHead, reqHdr: conditions, stored: validators, wantINM: `"v0"`, wantIMS: lastModified},
+		{
+			name:    "§4.3.2 stored response without validators: the request as it is",
+			reqHdr:  conditions,
+			stored:  &entry{header: http.Header{}},
+			wantINM: `"v0"`,
+			wantIMS: lastModified,
+		},
+		{
+			name:    "RFC 9110 §13.2.1 no conditional HEAD: the request as it is",
+			method:  http.MethodHead,
+			reqHdr:  conditions,
+			stored:  validators,
+			wantINM: `"v0"`,
+			wantIMS: lastModified,
+		},
 		{name: "§4.3.1 validators of the stored response", stored: validators, validating: true, wantINM: `"v1"`, wantIMS: lastModified},
-		{name: "§4.3.1 in place of the conditions of the client", reqHdr: http.Header{"If-None-Match": {`"v0"`}}, stored: validators, validating: true, wantINM: `"v1"`, wantIMS: lastModified},
-		{name: "§4.3.1 entity tag only", reqHdr: conditions, stored: &entry{header: http.Header{"Etag": {`W/"v1"`}}}, validating: true, wantINM: `W/"v1"`},
-		{name: "§4.3.1 Last-Modified only", reqHdr: http.Header{"If-None-Match": {`"v0"`}}, stored: &entry{header: http.Header{"Last-Modified": {lastModified}}}, validating: true, wantIMS: lastModified},
+		{
+			name:       "§4.3.1 in place of the conditions of the client",
+			reqHdr:     http.Header{"If-None-Match": {`"v0"`}},
+			stored:     validators,
+			validating: true,
+			wantINM:    `"v1"`,
+			wantIMS:    lastModified,
+		},
+		{
+			name:       "§4.3.1 entity tag only",
+			reqHdr:     conditions,
+			stored:     &entry{header: http.Header{"Etag": {`W/"v1"`}}},
+			validating: true,
+			wantINM:    `W/"v1"`,
+		},
+		{
+			name:       "§4.3.1 Last-Modified only",
+			reqHdr:     http.Header{"If-None-Match": {`"v0"`}},
+			stored:     &entry{header: http.Header{"Last-Modified": {lastModified}}},
+			validating: true,
+			wantIMS:    lastModified,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -147,20 +249,77 @@ func TestValidates(t *testing.T) {
 		wantCurrent bool
 		wantUpdate  bool
 	}{
-		{name: "§4.3.4 same strong validator", stored: http.Header{"Etag": {`"v1"`}}, h: http.Header{"Etag": {`"v1"`}}, wantCurrent: true, wantUpdate: true},
+		{
+			name:        "§4.3.4 same strong validator",
+			stored:      http.Header{"Etag": {`"v1"`}},
+			h:           http.Header{"Etag": {`"v1"`}},
+			wantCurrent: true,
+			wantUpdate:  true,
+		},
 		{name: "§4.3.4 another strong validator", stored: http.Header{"Etag": {`"v1"`}}, h: http.Header{"Etag": {`"v2"`}}},
 		{name: "§4.3.4 a strong validator is not a weak one", stored: http.Header{"Etag": {`W/"v1"`}}, h: http.Header{"Etag": {`"v1"`}}},
-		{name: "§4.3.4 strong validator for a response stored without one", stored: http.Header{"Last-Modified": {lastModified}}, h: http.Header{"Etag": {`"v1"`}}},
-		{name: "§4.3.4 Last-Modified does not matter with a strong validator", stored: http.Header{"Etag": {`"v1"`}, "Last-Modified": {lastModified}}, h: http.Header{"Etag": {`"v1"`}, "Last-Modified": {earlier}}, wantCurrent: true, wantUpdate: true},
-		{name: "§4.3.4 corresponding weak validator", stored: http.Header{"Etag": {`W/"v1"`}}, h: http.Header{"Etag": {`W/"v1"`}}, wantCurrent: true, wantUpdate: true},
-		{name: "§4.3.4 weak validator of a strong stored one", stored: http.Header{"Etag": {`"v1"`}}, h: http.Header{"Etag": {`W/"v1"`}}, wantCurrent: true, wantUpdate: true},
+		{
+			name:   "§4.3.4 strong validator for a response stored without one",
+			stored: http.Header{"Last-Modified": {lastModified}},
+			h:      http.Header{"Etag": {`"v1"`}},
+		},
+		{
+			name:        "§4.3.4 Last-Modified does not matter with a strong validator",
+			stored:      http.Header{"Etag": {`"v1"`}, "Last-Modified": {lastModified}},
+			h:           http.Header{"Etag": {`"v1"`}, "Last-Modified": {earlier}},
+			wantCurrent: true,
+			wantUpdate:  true,
+		},
+		{
+			name:        "§4.3.4 corresponding weak validator",
+			stored:      http.Header{"Etag": {`W/"v1"`}},
+			h:           http.Header{"Etag": {`W/"v1"`}},
+			wantCurrent: true,
+			wantUpdate:  true,
+		},
+		{
+			name:        "§4.3.4 weak validator of a strong stored one",
+			stored:      http.Header{"Etag": {`"v1"`}},
+			h:           http.Header{"Etag": {`W/"v1"`}},
+			wantCurrent: true,
+			wantUpdate:  true,
+		},
 		{name: "§4.3.4 another weak validator", stored: http.Header{"Etag": {`W/"v1"`}}, h: http.Header{"Etag": {`W/"v2"`}}},
-		{name: "§4.3.4 weak validator for a response stored without one", stored: http.Header{"Last-Modified": {lastModified}}, h: http.Header{"Etag": {`W/"v1"`}}},
-		{name: "§4.3.4 corresponding Last-Modified", stored: http.Header{"Last-Modified": {lastModified}}, h: http.Header{"Last-Modified": {lastModified}}, wantCurrent: true, wantUpdate: true},
-		{name: "§4.3.4 Last-Modified of a response with an entity tag", stored: http.Header{"Etag": {`"v1"`}, "Last-Modified": {lastModified}}, h: http.Header{"Last-Modified": {lastModified}}, wantCurrent: true, wantUpdate: true},
-		{name: "§4.3.4 another Last-Modified", stored: http.Header{"Last-Modified": {lastModified}}, h: http.Header{"Last-Modified": {earlier}}},
-		{name: "§4.3.4 weak validators must all correspond", stored: http.Header{"Etag": {`W/"v1"`}, "Last-Modified": {lastModified}}, h: http.Header{"Etag": {`W/"v1"`}, "Last-Modified": {earlier}}},
-		{name: "§4.3.4 no validator: reused, not updated", stored: http.Header{"Etag": {`"v1"`}}, h: http.Header{"Cache-Control": {"max-age=60"}}, wantCurrent: true},
+		{
+			name:   "§4.3.4 weak validator for a response stored without one",
+			stored: http.Header{"Last-Modified": {lastModified}},
+			h:      http.Header{"Etag": {`W/"v1"`}},
+		},
+		{
+			name:        "§4.3.4 corresponding Last-Modified",
+			stored:      http.Header{"Last-Modified": {lastModified}},
+			h:           http.Header{"Last-Modified": {lastModified}},
+			wantCurrent: true,
+			wantUpdate:  true,
+		},
+		{
+			name:        "§4.3.4 Last-Modified of a response with an entity tag",
+			stored:      http.Header{"Etag": {`"v1"`}, "Last-Modified": {lastModified}},
+			h:           http.Header{"Last-Modified": {lastModified}},
+			wantCurrent: true,
+			wantUpdate:  true,
+		},
+		{
+			name:   "§4.3.4 another Last-Modified",
+			stored: http.Header{"Last-Modified": {lastModified}},
+			h:      http.Header{"Last-Modified": {earlier}},
+		},
+		{
+			name:   "§4.3.4 weak validators must all correspond",
+			stored: http.Header{"Etag": {`W/"v1"`}, "Last-Modified": {lastModified}},
+			h:      http.Header{"Etag": {`W/"v1"`}, "Last-Modified": {earlier}},
+		},
+		{
+			name:        "§4.3.4 no validator: reused, not updated",
+			stored:      http.Header{"Etag": {`"v1"`}},
+			h:           http.Header{"Cache-Control": {"max-age=60"}},
+			wantCurrent: true,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -179,12 +338,19 @@ func TestHeadMatches(t *testing.T) {
 		h    http.Header
 		want bool
 	}{
-		{name: "§4.3.5 same validators and length", h: http.Header{"Etag": {`"v1"`}, "Last-Modified": {lastModified}, "Content-Length": {"5"}}, want: true},
+		{
+			name: "§4.3.5 same validators and length",
+			h:    http.Header{"Etag": {`"v1"`}, "Last-Modified": {lastModified}, "Content-Length": {"5"}},
+			want: true,
+		},
 		{name: "§4.3.5 only the fields it has are compared", h: http.Header{"Etag": {`"v1"`}}, want: true},
 		{name: "§4.3.5 no validator nor length", h: http.Header{}, want: true},
 		{name: "§4.3.5 another entity tag", h: http.Header{"Etag": {`"v2"`}, "Content-Length": {"5"}}},
 		{name: "§4.3.5 a weak entity tag is another value", h: http.Header{"Etag": {`W/"v1"`}}},
-		{name: "§4.3.5 another Last-Modified", h: http.Header{"Etag": {`"v1"`}, "Last-Modified": {t0.Add(time.Hour).Format(http.TimeFormat)}}},
+		{
+			name: "§4.3.5 another Last-Modified",
+			h:    http.Header{"Etag": {`"v1"`}, "Last-Modified": {t0.Add(time.Hour).Format(http.TimeFormat)}},
+		},
 		{name: "§4.3.5 another length", h: http.Header{"Etag": {`"v1"`}, "Content-Length": {"6"}}},
 	}
 	for _, tt := range tests {
@@ -218,8 +384,7 @@ func TestRefreshed(t *testing.T) {
 		"Content-Length": {"0"}, "Connection": {"X-Hop"}, "X-Hop": {"1"},
 		// §3.1: stored like any other field, unless Cache-Control excludes it.
 		"Set-Cookie": {"sid=1"},
-		// Regression: Traefik sends its 304 with a Content-Type set to no value,
-		// which removed the stored one.
+		// Regression: Traefik sends its 304 with a Content-Type set to no value, which removed the stored one.
 		"Content-Type": nil,
 	}
 	got := refreshed(e, h, t0, t0.Add(time.Second))
@@ -241,21 +406,24 @@ func TestRefreshed(t *testing.T) {
 		t.Error("the stored entry must not be modified")
 	}
 
-	// §3.1: the fields that the updated response forbids to store, whether the
-	// 304 or the stored response says so.
+	// §3.1: the fields that the updated response forbids to store, whether the 304 or the stored response says so.
 	h = http.Header{"Cache-Control": {`max-age=120, private="Set-Cookie"`}, "Set-Cookie": {"sid=1"}, "X-New": {"added"}}
 	got = refreshed(e, h, t0, t0)
 	if len(got.header.Values("Set-Cookie")) != 0 || got.header.Get("X-New") != "added" {
 		t.Errorf("§3.1 excluded by the 304: %v", got.header)
 	}
-	excluding := &entry{status: 200, header: http.Header{"Cache-Control": {`max-age=60, no-cache="Set-Cookie"`}}, requestTime: old, responseTime: old}
+	excluding := &entry{
+		status:       200,
+		header:       http.Header{"Cache-Control": {`max-age=60, no-cache="Set-Cookie"`}},
+		requestTime:  old,
+		responseTime: old,
+	}
 	got = refreshed(excluding, http.Header{"Set-Cookie": {"sid=1"}, "X-New": {"added"}}, t0, t0)
 	if len(got.header.Values("Set-Cookie")) != 0 || got.header.Get("X-New") != "added" {
 		t.Errorf("§3.1 excluded by the stored response: %v", got.header)
 	}
 
-	// RFC 9110 §15.4.5: the representation metadata of a 304 may describe
-	// another representation than the stored body, which keeps its own.
+	// RFC 9110 §15.4.5: the representation metadata of a 304 may describe another representation than the stored body, which keeps its own.
 	got = refreshed(e, http.Header{"Content-Type": {"text/html"}, "X-New": {"added"}}, t0, t0)
 	if got.header.Get("Content-Type") != "text/plain" || got.header.Get("X-New") != "added" {
 		t.Errorf("Content-Type = %q, X-New = %q", got.header.Get("Content-Type"), got.header.Get("X-New"))
@@ -269,8 +437,7 @@ func TestRefreshed(t *testing.T) {
 	}
 }
 
-// origin is a backend with validators: it answers the conditions matching its
-// current response with a 304.
+// origin is a backend with validators: it answers the conditions matching its current response with a 304.
 type origin struct {
 	etag         string
 	lastModified string
@@ -353,7 +520,11 @@ func TestClientConditionsOnHit(t *testing.T) {
 		{name: "§4.3.2 If-Modified-Since with Last-Modified", reqHdr: http.Header{"If-Modified-Since": {lastModified}}, want: 304},
 		{name: "§4.3.2 If-Modified-Since later", reqHdr: http.Header{"If-Modified-Since": {later}}, want: 304},
 		{name: "§4.3.2 If-Modified-Since earlier", reqHdr: http.Header{"If-Modified-Since": {earlier}}, want: 200},
-		{name: "§4.3.2 If-None-Match wins over If-Modified-Since", reqHdr: http.Header{"If-None-Match": {`"v0"`}, "If-Modified-Since": {later}}, want: 200},
+		{
+			name:   "§4.3.2 If-None-Match wins over If-Modified-Since",
+			reqHdr: http.Header{"If-None-Match": {`"v0"`}, "If-Modified-Since": {later}},
+			want:   200,
+		},
 		{name: "§4.3.2 HEAD", method: http.MethodHead, reqHdr: http.Header{"If-None-Match": {`"v1"`}}, want: 304},
 	}
 	for _, tt := range tests {
@@ -411,8 +582,7 @@ func TestClientConditionsOnHitWithoutValidators(t *testing.T) {
 	}
 }
 
-// Without a stored response, the conditions of the client are for the backend
-// (§4.3.2, RFC 9110 §13.2.1): the cache does not evaluate them.
+// Without a stored response, the conditions of the client are for the backend (§4.3.2, RFC 9110 §13.2.1): the cache does not evaluate them.
 func TestClientConditionsWithoutStoredResponse(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -422,11 +592,38 @@ func TestClientConditionsWithoutStoredResponse(t *testing.T) {
 		wantStatus string
 		wantStored bool
 	}{
-		{name: "§4.3.2 the 304 of the backend goes to the client", reqHdr: http.Header{"If-None-Match": {`"v1"`}}, want: 304, wantStatus: "traedis; fwd=uri-miss; fwd-status=304"},
-		{name: "§4.3.2 If-Modified-Since", reqHdr: http.Header{"If-Modified-Since": {lastModified}}, want: 304, wantStatus: "traedis; fwd=uri-miss; fwd-status=304"},
-		{name: "§4.3.2 a whole response is stored", reqHdr: http.Header{"If-None-Match": {`"v0"`}}, want: 200, wantStatus: "traedis; fwd=uri-miss; fwd-status=200", wantStored: true},
-		{name: "§4.3.2 HEAD", method: http.MethodHead, reqHdr: http.Header{"If-None-Match": {`"v1"`}}, want: 304, wantStatus: "traedis; fwd=uri-miss; fwd-status=304"},
-		{name: "§5.2.1.4 request no-cache", reqHdr: http.Header{"If-None-Match": {`"v1"`}, "Cache-Control": {"no-cache"}}, want: 304, wantStatus: "traedis; fwd=request; fwd-status=304"},
+		{
+			name:       "§4.3.2 the 304 of the backend goes to the client",
+			reqHdr:     http.Header{"If-None-Match": {`"v1"`}},
+			want:       304,
+			wantStatus: "traedis; fwd=uri-miss; fwd-status=304",
+		},
+		{
+			name:       "§4.3.2 If-Modified-Since",
+			reqHdr:     http.Header{"If-Modified-Since": {lastModified}},
+			want:       304,
+			wantStatus: "traedis; fwd=uri-miss; fwd-status=304",
+		},
+		{
+			name:       "§4.3.2 a whole response is stored",
+			reqHdr:     http.Header{"If-None-Match": {`"v0"`}},
+			want:       200,
+			wantStatus: "traedis; fwd=uri-miss; fwd-status=200",
+			wantStored: true,
+		},
+		{
+			name:       "§4.3.2 HEAD",
+			method:     http.MethodHead,
+			reqHdr:     http.Header{"If-None-Match": {`"v1"`}},
+			want:       304,
+			wantStatus: "traedis; fwd=uri-miss; fwd-status=304",
+		},
+		{
+			name:       "§5.2.1.4 request no-cache",
+			reqHdr:     http.Header{"If-None-Match": {`"v1"`}, "Cache-Control": {"no-cache"}},
+			want:       304,
+			wantStatus: "traedis; fwd=request; fwd-status=304",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -464,7 +661,13 @@ func TestOtherPreconditionsReachTheBackend(t *testing.T) {
 	o := newOrigin()
 	c, st := newTestCache(t, o, nil)
 	storeValidated(t, st, "max-age=60", 2*time.Minute)
-	hdr := http.Header{"If-Match": {`"v1"`}, "If-Unmodified-Since": {lastModified}, "If-Range": {`"v1"`}, "Range": {"bytes=0-1"}, "If-None-Match": {`"v0"`}}
+	hdr := http.Header{
+		"If-Match":            {`"v1"`},
+		"If-Unmodified-Since": {lastModified},
+		"If-Range":            {`"v1"`},
+		"Range":               {"bytes=0-1"},
+		"If-None-Match":       {`"v0"`},
+	}
 	doRequest(c, http.MethodGet, staleURL, hdr)
 	for _, name := range []string{"If-Match", "If-Unmodified-Since", "If-Range", "Range"} {
 		if o.lastReq.Header.Get(name) != hdr.Get(name) {
@@ -544,7 +747,8 @@ func TestValidation(t *testing.T) {
 		t.Fatalf("§4.3.3 the stored response must be served: got %d %q", rec.Code, rec.Body.String())
 	}
 	h := rec.Header()
-	if h.Get("Cache-Control") != "max-age=120" || h.Get("X-New") != "added" || h.Get("X-Kept") != "stored" || h.Get("Content-Type") != "text/plain" {
+	if h.Get("Cache-Control") != "max-age=120" || h.Get("X-New") != "added" || h.Get("X-Kept") != "stored" ||
+		h.Get("Content-Type") != "text/plain" {
 		t.Errorf("§4.3.4 the stored fields are updated by those of the 304: %v", h)
 	}
 	if h.Get("Age") != "0" || h.Get("X-Before") != "kept" {
@@ -559,7 +763,8 @@ func TestValidation(t *testing.T) {
 	if e == nil || st.sets != 2 || st.dels != 0 {
 		t.Fatalf("the entry must be stored again (sets %d, dels %d)", st.sets, st.dels)
 	}
-	if string(e.body) != "old" || e.header.Get("Cache-Control") != "max-age=120" || e.header.Get("X-New") != "added" || time.Since(e.responseTime) > time.Minute {
+	if string(e.body) != "old" || e.header.Get("Cache-Control") != "max-age=120" || e.header.Get("X-New") != "added" ||
+		time.Since(e.responseTime) > time.Minute {
 		t.Errorf("§4.3.4 stored entry: %q %v, received %v", e.body, e.header, e.responseTime)
 	}
 	if v, _ := st.lookup(cacheKey(staleURL), ""); !closeTo(v.ttl, 2*time.Minute+time.Hour) {
@@ -599,7 +804,8 @@ func TestValidationOutcome(t *testing.T) {
 		},
 		{
 			name: "§4.3.3 a whole response replaces the stored one", origin: func(o *origin) { o.etag = `"v2"` },
-			wantCode: 200, wantBody: "hello", wantStatus: "traedis; fwd=stale; fwd-status=200", wantCalls: 1, wantSent: `"v1"`, wantStored: "hello", wantSets: 2,
+			wantCode: 200, wantBody: "hello", wantStatus: "traedis; fwd=stale; fwd-status=200",
+			wantCalls: 1, wantSent: `"v1"`, wantStored: "hello", wantSets: 2,
 		},
 		{
 			name: "§4.3.2 the client has the validated response", reqHdr: http.Header{"If-None-Match": {`"v1"`}},
@@ -610,12 +816,16 @@ func TestValidationOutcome(t *testing.T) {
 			wantCode: 200, wantBody: "old", wantStatus: validated, wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 2,
 		},
 		{
-			name: "§4.3.3 a whole response is sent as it is, whatever the client has", reqHdr: http.Header{"If-None-Match": {`"v2"`}}, origin: func(o *origin) { o.etag = `"v2"` },
-			wantCode: 200, wantBody: "hello", wantStatus: "traedis; fwd=stale; fwd-status=200", wantCalls: 1, wantSent: `"v1"`, wantStored: "hello", wantSets: 2,
+			name:   "§4.3.3 a whole response is sent as it is, whatever the client has",
+			reqHdr: http.Header{"If-None-Match": {`"v2"`}}, origin: func(o *origin) { o.etag = `"v2"` },
+			wantCode: 200, wantBody: "hello", wantStatus: "traedis; fwd=stale; fwd-status=200",
+			wantCalls: 1, wantSent: `"v1"`, wantStored: "hello", wantSets: 2,
 		},
 		{
-			name: "§5.2.1.1 request max-age=0 on a fresh response", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}},
-			wantCode: 200, wantBody: "old", wantStatus: "traedis; fwd=request; fwd-status=304; ttl=", wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 2,
+			name:         "§5.2.1.1 request max-age=0 on a fresh response",
+			cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}},
+			wantCode: 200, wantBody: "old", wantStatus: "traedis; fwd=request; fwd-status=304; ttl=",
+			wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 2,
 		},
 		{
 			name: "§5.2.2.2 must-revalidate", cacheControl: "max-age=60, must-revalidate",
@@ -627,19 +837,25 @@ func TestValidationOutcome(t *testing.T) {
 		},
 		{
 			name: "§5.2.1.4 request no-cache: the cache is not read", reqHdr: http.Header{"Cache-Control": {"no-cache"}},
-			wantCode: 200, wantBody: "hello", wantStatus: "traedis; fwd=request; fwd-status=200", wantCalls: 1, wantStored: "hello", wantSets: 2,
+			wantCode: 200, wantBody: "hello", wantStatus: "traedis; fwd=request; fwd-status=200",
+			wantCalls: 1, wantStored: "hello", wantSets: 2,
 		},
 		{
 			name: "RFC 9110 §13.2.1 a HEAD is not conditional", method: http.MethodHead,
 			wantCode: 200, wantStatus: "traedis; fwd=stale; fwd-status=200", wantCalls: 1, wantStored: "old", wantSets: 1,
 		},
 		{
-			name: "§4.3.4 304 without validator: the stored response is served, not updated", origin: func(o *origin) { o.bare304 = true; o.cacheControl = "max-age=120" },
-			wantCode: 200, wantBody: "old", wantStatus: "traedis; fwd=stale; fwd-status=304; ttl=-", wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 1,
+			name: "§4.3.4 304 without validator: the stored response is served, not updated", origin: func(o *origin) {
+				o.bare304 = true
+				o.cacheControl = "max-age=120"
+			},
+			wantCode: 200, wantBody: "old", wantStatus: "traedis; fwd=stale; fwd-status=304; ttl=-",
+			wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 1,
 		},
 		{
 			name: "§4.3.4 304 about another response: the backend is asked again", origin: func(o *origin) { o.etagOf304 = `"v2"` },
-			wantCode: 200, wantBody: "hello", wantStatus: "traedis; fwd=stale; fwd-status=200", wantCalls: 2, wantStored: "hello", wantSets: 2,
+			wantCode: 200, wantBody: "hello", wantStatus: "traedis; fwd=stale; fwd-status=200",
+			wantCalls: 2, wantStored: "hello", wantSets: 2,
 		},
 		{
 			name: "§5.2.2.5 304 with no-store: served, left as it was", origin: func(o *origin) { o.cacheControl = "no-store" },
@@ -650,12 +866,18 @@ func TestValidationOutcome(t *testing.T) {
 			wantCode: 200, wantBody: "old", wantStatus: validated, wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 1,
 		},
 		{
-			name: "RFC 5861 §4 backend error", cacheControl: "max-age=60, stale-if-error=300", origin: func(o *origin) { o.status = 503; o.etag = `"v2"`; o.body = "error" },
-			wantCode: 200, wantBody: "old", wantStatus: "traedis; fwd=stale; fwd-status=503; ttl=-", wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 1,
+			name: "RFC 5861 §4 backend error", cacheControl: "max-age=60, stale-if-error=300", origin: func(o *origin) {
+				o.status = 503
+				o.etag = `"v2"`
+				o.body = "error"
+			},
+			wantCode: 200, wantBody: "old", wantStatus: "traedis; fwd=stale; fwd-status=503; ttl=-",
+			wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 1,
 		},
 		{
 			name: "backend error without stale-if-error", origin: func(o *origin) { o.status = 503; o.etag = `"v2"`; o.body = "error" },
-			wantCode: 503, wantBody: "error", wantStatus: "traedis; fwd=stale; fwd-status=503", wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 1,
+			wantCode: 503, wantBody: "error", wantStatus: "traedis; fwd=stale; fwd-status=503",
+			wantCalls: 1, wantSent: `"v1"`, wantStored: "old", wantSets: 1,
 		},
 	}
 	for _, tt := range tests {
@@ -737,8 +959,16 @@ func TestValidationWithSetCookie(t *testing.T) {
 		cacheControl string // of the 304
 		wantRefresh  bool   // otherwise the entry is left as it was
 	}{
-		{name: `§5.2.2.7 private="Set-Cookie": the entry is refreshed without the cookie`, cacheControl: `max-age=60, private="Set-Cookie"`, wantRefresh: true},
-		{name: `§5.2.2.4 no-cache="Set-Cookie": the entry is refreshed without the cookie`, cacheControl: `max-age=60, no-cache="Set-Cookie"`, wantRefresh: true},
+		{
+			name:         `§5.2.2.7 private="Set-Cookie": the entry is refreshed without the cookie`,
+			cacheControl: `max-age=60, private="Set-Cookie"`,
+			wantRefresh:  true,
+		},
+		{
+			name:         `§5.2.2.4 no-cache="Set-Cookie": the entry is refreshed without the cookie`,
+			cacheControl: `max-age=60, no-cache="Set-Cookie"`,
+			wantRefresh:  true,
+		},
 		{name: "§3.1 a response with a cookie that is not excluded may not be stored", cacheControl: "max-age=60"},
 		{name: "public does not make a cookie shareable", cacheControl: "public, max-age=60"},
 	}
@@ -777,10 +1007,8 @@ func TestValidationWithSetCookie(t *testing.T) {
 	}
 }
 
-// RFC 9110 §15.4.5: a backend that chooses the format of its response by a
-// header field that Vary does not name may send the Content-Type of another
-// representation with its 304. The stored body keeps its own: otherwise, a
-// client would have it served to everyone as HTML.
+// RFC 9110 §15.4.5: a backend that chooses the format of its response by a header field that Vary does not name may send the Content-Type
+// of another representation with its 304. The stored body keeps its own: otherwise, a client would have it served to everyone as HTML.
 func TestValidationKeepsContentType(t *testing.T) {
 	o := newOrigin()
 	o.cacheControl = "max-age=60"
@@ -799,7 +1027,8 @@ func TestValidationKeepsContentType(t *testing.T) {
 	if e == nil || time.Since(e.responseTime) > time.Minute || e.header.Get("Content-Type") != "text/plain" {
 		t.Fatalf("the entry must be refreshed with its own Content-Type: %v", e)
 	}
-	if next := doRequest(c, http.MethodGet, staleURL, nil); !isHit(lastCacheStatus(next)) || next.Header().Get("Content-Type") != "text/plain" {
+	if next := doRequest(c, http.MethodGet, staleURL, nil); !isHit(lastCacheStatus(next)) ||
+		next.Header().Get("Content-Type") != "text/plain" {
 		t.Errorf("hit: %q, Content-Type = %q", lastCacheStatus(next), next.Header().Get("Content-Type"))
 	}
 }
@@ -830,7 +1059,8 @@ func TestValidationOfVariant(t *testing.T) {
 
 	// It accepts fewer codings than the request the variant was stored for.
 	rec := doRequest(c, http.MethodGet, staleURL, http.Header{"Accept-Language": {"fr"}})
-	if rec.Body.String() != "old fr" || !strings.HasPrefix(lastCacheStatus(rec), validated) || o.lastReq.Header.Get("If-None-Match") != `"v1"` {
+	if rec.Body.String() != "old fr" || !strings.HasPrefix(lastCacheStatus(rec), validated) ||
+		o.lastReq.Header.Get("If-None-Match") != `"v1"` {
 		t.Fatalf("got %q %q", rec.Body.String(), lastCacheStatus(rec))
 	}
 	fr := storedAt(t, st, staleURL, fields["fr"])
@@ -843,14 +1073,16 @@ func TestValidationOfVariant(t *testing.T) {
 	if en := storedAt(t, st, staleURL, fields["en"]); en == nil || time.Since(en.responseTime) < time.Minute {
 		t.Error("the other variant must be left as it was")
 	}
-	if m := func() marker { v, _ := st.lookup(key, ""); mk, _ := decodeMarker(v.value); return mk }(); !sameStrings(m.names, names) || !sameStrings(m.codings, []string{"zstd", identity}) {
+	if m := func() marker { v, _ := st.lookup(key, ""); mk, _ := decodeMarker(v.value); return mk }(); !sameStrings(m.names, names) ||
+		!sameStrings(m.codings, []string{"zstd", identity}) {
 		t.Errorf("marker = %+v", m)
 	}
 	if n, _ := st.count(context.Background(), key); n != 5 {
 		t.Errorf("fields = %d, want the marker and the 2 fields of 2 variants", n)
 	}
 	browser := http.Header{"Accept-Language": {"fr"}, "Accept-Encoding": {"gzip, br"}}
-	if next := doRequest(c, http.MethodGet, staleURL, browser); !isHit(lastCacheStatus(next)) || next.Body.String() != "old fr" || o.calls != 1 {
+	if next := doRequest(c, http.MethodGet, staleURL, browser); !isHit(lastCacheStatus(next)) || next.Body.String() != "old fr" ||
+		o.calls != 1 {
 		t.Errorf("the variant is fresh again, for the same requests: %q", lastCacheStatus(next))
 	}
 }
@@ -865,11 +1097,37 @@ func TestBackgroundValidation(t *testing.T) {
 		wantSets   int
 	}{
 		{name: "§4.3.3 304 refreshes the entry", wantStored: "old", wantFresh: true, wantSets: 2},
-		{name: "§4.3.3 a whole response replaces it", origin: func(o *origin) { o.etag = `"v2"` }, wantStored: "hello", wantFresh: true, wantSets: 2},
-		{name: "§4.3.4 304 about another response leaves it as it is", origin: func(o *origin) { o.etagOf304 = `"v2"` }, wantStored: "old", wantSets: 1},
-		{name: "§4.3.4 304 without validator leaves it as it is", origin: func(o *origin) { o.bare304 = true }, wantStored: "old", wantSets: 1},
-		{name: "§5.2.2.5 304 with no-store leaves it as it is", origin: func(o *origin) { o.cacheControl = "no-store" }, wantStored: "old", wantSets: 1},
-		{name: "RFC 5861 §4 backend error keeps it", origin: func(o *origin) { o.status = 503; o.etag = `"v2"` }, wantStored: "old", wantSets: 1},
+		{
+			name:       "§4.3.3 a whole response replaces it",
+			origin:     func(o *origin) { o.etag = `"v2"` },
+			wantStored: "hello",
+			wantFresh:  true,
+			wantSets:   2,
+		},
+		{
+			name:       "§4.3.4 304 about another response leaves it as it is",
+			origin:     func(o *origin) { o.etagOf304 = `"v2"` },
+			wantStored: "old",
+			wantSets:   1,
+		},
+		{
+			name:       "§4.3.4 304 without validator leaves it as it is",
+			origin:     func(o *origin) { o.bare304 = true },
+			wantStored: "old",
+			wantSets:   1,
+		},
+		{
+			name:       "§5.2.2.5 304 with no-store leaves it as it is",
+			origin:     func(o *origin) { o.cacheControl = "no-store" },
+			wantStored: "old",
+			wantSets:   1,
+		},
+		{
+			name:       "RFC 5861 §4 backend error keeps it",
+			origin:     func(o *origin) { o.status = 503; o.etag = `"v2"` },
+			wantStored: "old",
+			wantSets:   1,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -885,7 +1143,8 @@ func TestBackgroundValidation(t *testing.T) {
 				t.Fatalf("the stale response must be served: got %d %q %q", rec.Code, rec.Body.String(), lastCacheStatus(rec))
 			}
 			waitRevalidations(t, c)
-			if o.calls != 1 || o.lastReq.Header.Get("If-None-Match") != `"v1"` || o.lastReq.Header.Get("If-Modified-Since") != lastModified {
+			if o.calls != 1 || o.lastReq.Header.Get("If-None-Match") != `"v1"` ||
+				o.lastReq.Header.Get("If-Modified-Since") != lastModified {
 				t.Fatalf("§4.3.1 the revalidation must send the validators of the entry (calls %d): %v", o.calls, o.lastReq.Header)
 			}
 			e := storedAt(t, st, staleURL, "")
@@ -903,8 +1162,7 @@ func TestBackgroundValidation(t *testing.T) {
 	}
 }
 
-// The 200 response to a forwarded HEAD updates or invalidates the stored GET
-// response it could have been answered with (§4.3.5).
+// The 200 response to a forwarded HEAD updates or invalidates the stored GET response it could have been answered with (§4.3.5).
 func TestHeadFreshensStoredResponse(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -917,18 +1175,98 @@ func TestHeadFreshensStoredResponse(t *testing.T) {
 		wantDels     int
 	}{
 		{name: "same response, stale entry: refreshed", cacheControl: "max-age=60", wantStored: true, wantFresh: true, wantSets: 2},
-		{name: "same response, fresh entry refused by the request: refreshed", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, wantStored: true, wantFresh: true, wantSets: 2},
-		{name: "same response, request no-cache: refreshed", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"no-cache"}}, wantStored: true, wantFresh: true, wantSets: 2},
-		{name: "another entity tag, fresh entry: a client cannot evict it", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.etag = `"v2"` }, wantStored: true, wantSets: 1},
-		{name: "another entity tag, request no-cache: a client cannot evict it", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"no-cache"}}, origin: func(o *origin) { o.etag = `"v2"` }, wantStored: true, wantSets: 1},
-		{name: "another length: a client cannot evict it", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.body = "longer" }, wantStored: true, wantSets: 1},
-		{name: "no validator: nothing is known of the stored response", cacheControl: "max-age=60", origin: func(o *origin) { o.etag = ""; o.lastModified = "" }, wantStored: true, wantSets: 1},
-		{name: "no validator but another length: a client cannot evict it", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.etag = ""; o.lastModified = ""; o.body = "longer" }, wantStored: true, wantSets: 1},
-		{name: "another entity tag, stale entry: it is stale already", cacheControl: "max-age=60", origin: func(o *origin) { o.etag = `"v2"` }, wantStored: true, wantSets: 1},
-		{name: "another content coding is another variant", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.etag = `"v2"`; o.extra = http.Header{"Content-Encoding": {"gzip"}} }, wantStored: true, wantSets: 1},
-		{name: "not a 200", cacheControl: "max-age=3600", reqHdr: http.Header{"Cache-Control": {"max-age=0"}}, origin: func(o *origin) { o.status = 404; o.etag = `"v2"` }, wantStored: true, wantSets: 1},
-		{name: "same response that may no longer be stored: left as it was", cacheControl: "max-age=60", origin: func(o *origin) { o.cacheControl = "no-store" }, wantStored: true, wantSets: 1},
-		{name: "§5.2.1.5 request no-store: not stored again", cacheControl: "max-age=60", reqHdr: http.Header{"Cache-Control": {"no-store"}}, wantStored: true, wantSets: 1},
+		{
+			name:         "same response, fresh entry refused by the request: refreshed",
+			cacheControl: "max-age=3600",
+			reqHdr:       http.Header{"Cache-Control": {"max-age=0"}},
+			wantStored:   true,
+			wantFresh:    true,
+			wantSets:     2,
+		},
+		{
+			name:         "same response, request no-cache: refreshed",
+			cacheControl: "max-age=3600",
+			reqHdr:       http.Header{"Cache-Control": {"no-cache"}},
+			wantStored:   true,
+			wantFresh:    true,
+			wantSets:     2,
+		},
+		{
+			name:         "another entity tag, fresh entry: a client cannot evict it",
+			cacheControl: "max-age=3600",
+			reqHdr:       http.Header{"Cache-Control": {"max-age=0"}},
+			origin:       func(o *origin) { o.etag = `"v2"` },
+			wantStored:   true,
+			wantSets:     1,
+		},
+		{
+			name:         "another entity tag, request no-cache: a client cannot evict it",
+			cacheControl: "max-age=3600",
+			reqHdr:       http.Header{"Cache-Control": {"no-cache"}},
+			origin:       func(o *origin) { o.etag = `"v2"` },
+			wantStored:   true,
+			wantSets:     1,
+		},
+		{
+			name:         "another length: a client cannot evict it",
+			cacheControl: "max-age=3600",
+			reqHdr:       http.Header{"Cache-Control": {"max-age=0"}},
+			origin:       func(o *origin) { o.body = "longer" },
+			wantStored:   true,
+			wantSets:     1,
+		},
+		{
+			name:         "no validator: nothing is known of the stored response",
+			cacheControl: "max-age=60",
+			origin:       func(o *origin) { o.etag = ""; o.lastModified = "" },
+			wantStored:   true,
+			wantSets:     1,
+		},
+		{
+			name:         "no validator but another length: a client cannot evict it",
+			cacheControl: "max-age=3600",
+			reqHdr:       http.Header{"Cache-Control": {"max-age=0"}},
+			origin:       func(o *origin) { o.etag = ""; o.lastModified = ""; o.body = "longer" },
+			wantStored:   true,
+			wantSets:     1,
+		},
+		{
+			name:         "another entity tag, stale entry: it is stale already",
+			cacheControl: "max-age=60",
+			origin:       func(o *origin) { o.etag = `"v2"` },
+			wantStored:   true,
+			wantSets:     1,
+		},
+		{
+			name:         "another content coding is another variant",
+			cacheControl: "max-age=3600",
+			reqHdr:       http.Header{"Cache-Control": {"max-age=0"}},
+			origin:       func(o *origin) { o.etag = `"v2"`; o.extra = http.Header{"Content-Encoding": {"gzip"}} },
+			wantStored:   true,
+			wantSets:     1,
+		},
+		{
+			name:         "not a 200",
+			cacheControl: "max-age=3600",
+			reqHdr:       http.Header{"Cache-Control": {"max-age=0"}},
+			origin:       func(o *origin) { o.status = 404; o.etag = `"v2"` },
+			wantStored:   true,
+			wantSets:     1,
+		},
+		{
+			name:         "same response that may no longer be stored: left as it was",
+			cacheControl: "max-age=60",
+			origin:       func(o *origin) { o.cacheControl = "no-store" },
+			wantStored:   true,
+			wantSets:     1,
+		},
+		{
+			name:         "§5.2.1.5 request no-store: not stored again",
+			cacheControl: "max-age=60",
+			reqHdr:       http.Header{"Cache-Control": {"no-store"}},
+			wantStored:   true,
+			wantSets:     1,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -950,7 +1288,10 @@ func TestHeadFreshensStoredResponse(t *testing.T) {
 			}
 			e := storedAt(t, st, staleURL, "")
 			if (e != nil) != tt.wantStored || st.sets != tt.wantSets || st.dels != tt.wantDels {
-				t.Fatalf("stored = %v, sets = %d, dels = %d; want %v, %d, %d", e != nil, st.sets, st.dels, tt.wantStored, tt.wantSets, tt.wantDels)
+				t.Fatalf(
+					"stored = %v, sets = %d, dels = %d; want %v, %d, %d",
+					e != nil, st.sets, st.dels, tt.wantStored, tt.wantSets, tt.wantDels,
+				)
 			}
 			if e == nil {
 				return
@@ -964,7 +1305,8 @@ func TestHeadFreshensStoredResponse(t *testing.T) {
 			}
 			if tt.wantFresh {
 				next := doRequest(c, http.MethodGet, staleURL, nil)
-				if !isHit(lastCacheStatus(next)) || next.Body.String() != "old" || next.Header().Get("Content-Length") != "3" || o.calls != 1 {
+				if !isHit(lastCacheStatus(next)) || next.Body.String() != "old" || next.Header().Get("Content-Length") != "3" ||
+					o.calls != 1 {
 					t.Errorf("the entry must be fresh again: %q %q", lastCacheStatus(next), next.Body.String())
 				}
 			}
@@ -983,8 +1325,7 @@ func TestHeadWithoutStoredResponse(t *testing.T) {
 	}
 }
 
-// A stored response is validated without its body, which is only read when the
-// client gets it: not when it gets a 304 in turn.
+// A stored response is validated without its body, which is only read when the client gets it: not when it gets a 304 in turn.
 func TestValidationReadsTheBodyWhenSent(t *testing.T) {
 	entryOnly := []string{""}
 	withBody := []string{"", bodyField("")}
@@ -998,9 +1339,33 @@ func TestValidationReadsTheBodyWhenSent(t *testing.T) {
 		wantValidations int
 		wantCalls       int
 	}{
-		{name: "§4.3.2 the client has it: 304, the body is not read", ifNoneMatch: `"v1"`, wantCode: 304, wantReads: [][]string{entryOnly}, wantValidations: 1, wantCalls: 1},
-		{name: "§4.3.3 the client has another one: the body is read once validated", ifNoneMatch: `"v0"`, wantCode: 200, wantBody: "old", wantReads: [][]string{entryOnly, withBody}, wantValidations: 1, wantCalls: 1},
-		{name: "validated but its body is gone: the backend is asked for a whole response", ifNoneMatch: `"v0"`, gone: true, wantCode: 200, wantBody: "hello", wantReads: [][]string{entryOnly, withBody}, wantValidations: 1, wantCalls: 2},
+		{
+			name:            "§4.3.2 the client has it: 304, the body is not read",
+			ifNoneMatch:     `"v1"`,
+			wantCode:        304,
+			wantReads:       [][]string{entryOnly},
+			wantValidations: 1,
+			wantCalls:       1,
+		},
+		{
+			name:            "§4.3.3 the client has another one: the body is read once validated",
+			ifNoneMatch:     `"v0"`,
+			wantCode:        200,
+			wantBody:        "old",
+			wantReads:       [][]string{entryOnly, withBody},
+			wantValidations: 1,
+			wantCalls:       1,
+		},
+		{
+			name:            "validated but its body is gone: the backend is asked for a whole response",
+			ifNoneMatch:     `"v0"`,
+			gone:            true,
+			wantCode:        200,
+			wantBody:        "hello",
+			wantReads:       [][]string{entryOnly, withBody},
+			wantValidations: 1,
+			wantCalls:       2,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

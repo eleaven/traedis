@@ -26,13 +26,19 @@ func TestCreateConfigDefaults(t *testing.T) {
 		t.Errorf("defaultTTL = %v, staleTTL = %v", s.defaultTTL, s.staleTTL)
 	}
 	if s.defaultStaleWhileRevalidate != 0 || s.defaultStaleIfError != 0 {
-		t.Errorf("§4.2.4 no stale response unless the backend or the configuration allows it: %v, %v", s.defaultStaleWhileRevalidate, s.defaultStaleIfError)
+		t.Errorf(
+			"§4.2.4 no stale response unless the backend or the configuration allows it: %v, %v",
+			s.defaultStaleWhileRevalidate, s.defaultStaleIfError,
+		)
 	}
 	if s.maxRevalidations != 10 || s.revalidationTimeout != 30*time.Second {
 		t.Errorf("maxRevalidations = %d, revalidationTimeout = %v", s.maxRevalidations, s.revalidationTimeout)
 	}
 	if len(s.authorizationHeaders) != 0 || !s.ignoreClientCacheControl || !s.exposeCacheStatus {
-		t.Errorf("authorizationHeaders = %v, ignoreClientCacheControl = %v, exposeCacheStatus = %v", s.authorizationHeaders, s.ignoreClientCacheControl, s.exposeCacheStatus)
+		t.Errorf(
+			"authorizationHeaders = %v, ignoreClientCacheControl = %v, exposeCacheStatus = %v",
+			s.authorizationHeaders, s.ignoreClientCacheControl, s.exposeCacheStatus,
+		)
 	}
 	if s.maxBodyBytes != 5242880 || s.maxBufferedBytes != 64<<20 || s.maxVariants != 16 || s.sortQuery || s.exposeKey {
 		t.Errorf("settings = %+v", s)
@@ -50,7 +56,11 @@ func TestParseConfig(t *testing.T) {
 		{name: "zero redis.timeout", mutate: func(c *Config) { c.Redis.Timeout = "0" }, wantErr: "redis.timeout"},
 		{name: "invalid redis.dialTimeout", mutate: func(c *Config) { c.Redis.DialTimeout = "fast" }, wantErr: "redis.dialTimeout"},
 		{name: "zero redis.dialTimeout", mutate: func(c *Config) { c.Redis.DialTimeout = "0" }, wantErr: "redis.dialTimeout"},
-		{name: "redis.dialTimeout past redis.timeout", mutate: func(c *Config) { c.Redis.Timeout = "20ms" }, wantErr: "redis.dialTimeout must not exceed redis.timeout"},
+		{
+			name:    "redis.dialTimeout past redis.timeout",
+			mutate:  func(c *Config) { c.Redis.Timeout = "20ms" },
+			wantErr: "redis.dialTimeout must not exceed redis.timeout",
+		},
 		{name: "zero redis.poolSize", mutate: func(c *Config) { c.Redis.PoolSize = 0 }, wantErr: "redis.poolSize"},
 		{name: "zero maxRevalidations", mutate: func(c *Config) { c.MaxRevalidations = 0 }, wantErr: "maxRevalidations"},
 		{name: "invalid revalidationTimeout", mutate: func(c *Config) { c.RevalidationTimeout = "30" }, wantErr: "revalidationTimeout"},
@@ -69,7 +79,11 @@ func TestParseConfig(t *testing.T) {
 		{name: "zero redis.retryAfter", mutate: func(c *Config) { c.Redis.RetryAfter = "0" }, wantErr: "redis.retryAfter"},
 		{name: "invalid defaultTtl", mutate: func(c *Config) { c.DefaultTTL = "5 minutes" }, wantErr: "defaultTtl"},
 		{name: "negative staleTtl", mutate: func(c *Config) { c.StaleTTL = "-1s" }, wantErr: "staleTtl"},
-		{name: "invalid defaultStaleWhileRevalidate", mutate: func(c *Config) { c.DefaultStaleWhileRevalidate = "30" }, wantErr: "defaultStaleWhileRevalidate"},
+		{
+			name:    "invalid defaultStaleWhileRevalidate",
+			mutate:  func(c *Config) { c.DefaultStaleWhileRevalidate = "30" },
+			wantErr: "defaultStaleWhileRevalidate",
+		},
 		{name: "negative defaultStaleIfError", mutate: func(c *Config) { c.DefaultStaleIfError = "-1s" }, wantErr: "defaultStaleIfError"},
 		{
 			name:   "defaultTtl 0 disables heuristic freshness",
@@ -80,8 +94,16 @@ func TestParseConfig(t *testing.T) {
 				}
 			},
 		},
-		{name: "defaultStaleWhileRevalidate past staleTtl", mutate: func(c *Config) { c.DefaultStaleWhileRevalidate = "2h" }, wantErr: "defaultStaleWhileRevalidate must not exceed staleTtl"},
-		{name: "defaultStaleIfError without staleTtl", mutate: func(c *Config) { c.StaleTTL = "0"; c.DefaultStaleIfError = "10m" }, wantErr: "defaultStaleIfError must not exceed staleTtl"},
+		{
+			name:    "defaultStaleWhileRevalidate past staleTtl",
+			mutate:  func(c *Config) { c.DefaultStaleWhileRevalidate = "2h" },
+			wantErr: "defaultStaleWhileRevalidate must not exceed staleTtl",
+		},
+		{
+			name:    "defaultStaleIfError without staleTtl",
+			mutate:  func(c *Config) { c.StaleTTL = "0"; c.DefaultStaleIfError = "10m" },
+			wantErr: "defaultStaleIfError must not exceed staleTtl",
+		},
 		{
 			name:   "stale windows up to staleTtl",
 			mutate: func(c *Config) { c.DefaultStaleWhileRevalidate = "1h"; c.DefaultStaleIfError = "1h" },
@@ -91,18 +113,58 @@ func TestParseConfig(t *testing.T) {
 				}
 			},
 		},
-		{name: "invalid status code", mutate: func(c *Config) { c.StatusCodes = []string{"200", "999"} }, wantErr: `statusCodes: invalid status code "999"`},
-		{name: "status code that is not a number", mutate: func(c *Config) { c.StatusCodes = []string{"2xx"} }, wantErr: `statusCodes: invalid status code "2xx"`},
+		{
+			name:    "invalid status code",
+			mutate:  func(c *Config) { c.StatusCodes = []string{"200", "999"} },
+			wantErr: `statusCodes: invalid status code "999"`,
+		},
+		{
+			name:    "status code that is not a number",
+			mutate:  func(c *Config) { c.StatusCodes = []string{"2xx"} },
+			wantErr: `statusCodes: invalid status code "2xx"`,
+		},
 		{name: "no status code", mutate: func(c *Config) { c.StatusCodes = []string{} }, wantErr: "statusCodes must not be empty"},
-		{name: "informational status code", mutate: func(c *Config) { c.StatusCodes = []string{"200", "103"} }, wantErr: "a 103 response is never stored"},
-		{name: "§3.3 partial content", mutate: func(c *Config) { c.StatusCodes = []string{"200", "206"} }, wantErr: "a 206 response is never stored"},
+		{
+			name:    "informational status code",
+			mutate:  func(c *Config) { c.StatusCodes = []string{"200", "103"} },
+			wantErr: "a 103 response is never stored",
+		},
+		{
+			name:    "§3.3 partial content",
+			mutate:  func(c *Config) { c.StatusCodes = []string{"200", "206"} },
+			wantErr: "a 206 response is never stored",
+		},
 		{name: "§3.2 not modified", mutate: func(c *Config) { c.StatusCodes = []string{"304"} }, wantErr: "a 304 response is never stored"},
-		{name: "range of a single code never stored", mutate: func(c *Config) { c.StatusCodes = []string{"304-304"} }, wantErr: "a 304 response is never stored"},
-		{name: "informational range", mutate: func(c *Config) { c.StatusCodes = []string{"100-199"} }, wantErr: "no response of 100-199 is ever stored"},
-		{name: "reversed range", mutate: func(c *Config) { c.StatusCodes = []string{"499-400"} }, wantErr: `statusCodes: invalid range "499-400"`},
-		{name: "range past 599", mutate: func(c *Config) { c.StatusCodes = []string{"500-600"} }, wantErr: `statusCodes: invalid range "500-600"`},
-		{name: "range without an end", mutate: func(c *Config) { c.StatusCodes = []string{"400-"} }, wantErr: `statusCodes: invalid range "400-"`},
-		{name: "range without a start", mutate: func(c *Config) { c.StatusCodes = []string{"-499"} }, wantErr: `statusCodes: invalid status code "-499"`},
+		{
+			name:    "range of a single code never stored",
+			mutate:  func(c *Config) { c.StatusCodes = []string{"304-304"} },
+			wantErr: "a 304 response is never stored",
+		},
+		{
+			name:    "informational range",
+			mutate:  func(c *Config) { c.StatusCodes = []string{"100-199"} },
+			wantErr: "no response of 100-199 is ever stored",
+		},
+		{
+			name:    "reversed range",
+			mutate:  func(c *Config) { c.StatusCodes = []string{"499-400"} },
+			wantErr: `statusCodes: invalid range "499-400"`,
+		},
+		{
+			name:    "range past 599",
+			mutate:  func(c *Config) { c.StatusCodes = []string{"500-600"} },
+			wantErr: `statusCodes: invalid range "500-600"`,
+		},
+		{
+			name:    "range without an end",
+			mutate:  func(c *Config) { c.StatusCodes = []string{"400-"} },
+			wantErr: `statusCodes: invalid range "400-"`,
+		},
+		{
+			name:    "range without a start",
+			mutate:  func(c *Config) { c.StatusCodes = []string{"-499"} },
+			wantErr: `statusCodes: invalid status code "-499"`,
+		},
 		{
 			name:   "ranges are expanded, without the codes never stored",
 			mutate: func(c *Config) { c.StatusCodes = []string{" 404", "300 - 304", "100-210", "404"} },
@@ -113,8 +175,16 @@ func TestParseConfig(t *testing.T) {
 				}
 			},
 		},
-		{name: "invalid authorizationHeaders", mutate: func(c *Config) { c.AuthorizationHeaders = []string{"X-User", "X User"} }, wantErr: `authorizationHeaders: invalid header field name "X User"`},
-		{name: "empty authorizationHeaders name", mutate: func(c *Config) { c.AuthorizationHeaders = []string{""} }, wantErr: "authorizationHeaders"},
+		{
+			name:    "invalid authorizationHeaders",
+			mutate:  func(c *Config) { c.AuthorizationHeaders = []string{"X-User", "X User"} },
+			wantErr: `authorizationHeaders: invalid header field name "X User"`,
+		},
+		{
+			name:    "empty authorizationHeaders name",
+			mutate:  func(c *Config) { c.AuthorizationHeaders = []string{""} },
+			wantErr: "authorizationHeaders",
+		},
 		{
 			name:   "authorizationHeaders are canonical, without duplicates",
 			mutate: func(c *Config) { c.AuthorizationHeaders = []string{" x-webauth-user", "X-Api-Key", "X-WEBAUTH-USER"} },
@@ -124,11 +194,27 @@ func TestParseConfig(t *testing.T) {
 				}
 			},
 		},
-		{name: "exposeKey without exposeCacheStatus", mutate: func(c *Config) { c.ExposeCacheStatus = false; c.ExposeKey = true }, wantErr: "exposeKey requires exposeCacheStatus"},
+		{
+			name:    "exposeKey without exposeCacheStatus",
+			mutate:  func(c *Config) { c.ExposeCacheStatus = false; c.ExposeKey = true },
+			wantErr: "exposeKey requires exposeCacheStatus",
+		},
 		{name: "zero maxBodyBytes", mutate: func(c *Config) { c.MaxBodyBytes = 0 }, wantErr: "maxBodyBytes"},
-		{name: "maxBodyBytes past what Redis takes", mutate: func(c *Config) { c.MaxBodyBytes = 512<<20 + 1 }, wantErr: "maxBodyBytes must not exceed"},
-		{name: "zero maxBufferedBytes", mutate: func(c *Config) { c.MaxBufferedBytes = 0 }, wantErr: "maxBufferedBytes must not be under maxBodyBytes"},
-		{name: "maxBufferedBytes under maxBodyBytes", mutate: func(c *Config) { c.MaxBodyBytes = 100 << 20 }, wantErr: "maxBufferedBytes must not be under maxBodyBytes"},
+		{
+			name:    "maxBodyBytes past what Redis takes",
+			mutate:  func(c *Config) { c.MaxBodyBytes = 512<<20 + 1 },
+			wantErr: "maxBodyBytes must not exceed",
+		},
+		{
+			name:    "zero maxBufferedBytes",
+			mutate:  func(c *Config) { c.MaxBufferedBytes = 0 },
+			wantErr: "maxBufferedBytes must not be under maxBodyBytes",
+		},
+		{
+			name:    "maxBufferedBytes under maxBodyBytes",
+			mutate:  func(c *Config) { c.MaxBodyBytes = 100 << 20 },
+			wantErr: "maxBufferedBytes must not be under maxBodyBytes",
+		},
 		{
 			name:   "maxBufferedBytes as large as maxBodyBytes",
 			mutate: func(c *Config) { c.MaxBodyBytes = 100 << 20; c.MaxBufferedBytes = 100 << 20 },
@@ -181,8 +267,16 @@ func TestParseConfig(t *testing.T) {
 			},
 		},
 		{name: "redis.tls.ca without rediss://", mutate: func(c *Config) { c.Redis.TLS.CA = "/certs/ca.crt" }, wantErr: "redis.tls"},
-		{name: "redis.tls.insecureSkipVerify without rediss://", mutate: func(c *Config) { c.Redis.TLS.InsecureSkipVerify = true }, wantErr: "redis.tls"},
-		{name: "redis.tls.ca file not found", mutate: func(c *Config) { c.Redis.DSN = "rediss://cache"; c.Redis.TLS.CA = "/no/such/ca.crt" }, wantErr: "redis.tls.ca"},
+		{
+			name:    "redis.tls.insecureSkipVerify without rediss://",
+			mutate:  func(c *Config) { c.Redis.TLS.InsecureSkipVerify = true },
+			wantErr: "redis.tls",
+		},
+		{
+			name:    "redis.tls.ca file not found",
+			mutate:  func(c *Config) { c.Redis.DSN = "rediss://cache"; c.Redis.TLS.CA = "/no/such/ca.crt" },
+			wantErr: "redis.tls.ca",
+		},
 		{
 			name:    "redis.tls.ca without certificate",
 			mutate:  func(c *Config) { c.Redis.DSN = "rediss://cache"; c.Redis.TLS.CA = "-----BEGIN CERTIFICATE-----\n" },

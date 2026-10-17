@@ -9,12 +9,10 @@ import (
 	"testing"
 )
 
-// Fuzzers of what parses data the cache does not trust: the replies of Redis,
-// what it stores, and the header fields of clients and backends. Their seeds
-// run with the tests; `make fuzz` looks for more.
+// Fuzzers of what parses data the cache does not trust: the replies of Redis, what it stores, and the header fields of clients and
+// backends. Their seeds run with the tests; `make fuzz` looks for more.
 
-// FuzzReadReply: whatever Redis sends, a reply is refused or within bounds,
-// and nothing is read past it.
+// FuzzReadReply: whatever Redis sends, a reply is refused or within bounds, and nothing is read past it.
 func FuzzReadReply(f *testing.F) {
 	for _, seed := range []string{
 		"+OK\r\n", "-ERR unknown command\r\n", ":3\r\n", "*1\r\n$5\r\nhello\r\n", "*3\r\n$5\r\nentry\r\n$-1\r\n$0\r\n\r\n",
@@ -44,11 +42,9 @@ func FuzzReadReply(f *testing.F) {
 	})
 }
 
-// FuzzDecodeEntry: whatever Redis holds, an entry is refused or one that can
-// be stored again, and is from then on read as it was stored. Not always as
-// it was first read: the standard library reads header fields that it writes
-// otherwise (a name with a space, which it leaves out; a folded value, which
-// it trims), and that our own entries never have.
+// FuzzDecodeEntry: whatever Redis holds, an entry is refused or one that can be stored again, and is from then on read as it was stored.
+// Not always as it was first read: the standard library reads header fields that it writes otherwise (a name with a space, which it leaves
+// out; a folded value, which it trims), and that our own entries never have.
 func FuzzDecodeEntry(f *testing.F) {
 	valid := encodeEntry(sampleEntry())
 	f.Add(valid)
@@ -82,8 +78,7 @@ func FuzzDecodeEntry(f *testing.F) {
 	})
 }
 
-// FuzzDecodeMarker: whatever Redis holds, a marker is refused or one that
-// selects a variant for any request.
+// FuzzDecodeMarker: whatever Redis holds, a marker is refused or one that selects a variant for any request.
 func FuzzDecodeMarker(f *testing.F) {
 	for _, seed := range []string{
 		"TRV1Accept-Language\n", "TRV1Accept-Encoding,Accept-Language\nbr,gzip,identity", "TRV1Accept-Encoding\nbr,compress",
@@ -112,12 +107,12 @@ func FuzzDecodeMarker(f *testing.F) {
 	})
 }
 
-// FuzzParseCacheControl: whatever a client or a backend sends, directives are
-// within bounds and the fields they name are header names.
+// FuzzParseCacheControl: whatever a client or a backend sends, directives are within bounds and the fields they name are header names.
 func FuzzParseCacheControl(f *testing.F) {
 	for _, seed := range []string{
-		"max-age=60", "public, max-age=60, s-maxage=\"120\"", "no-cache=\"Set-Cookie, X-A\", private=\"X-B\"", "max-age=99999999999999999999",
-		"max-age=-1", "max-age=1, max-age=2", "max-stale", "max-stale=5, min-fresh=3, only-if-cached", "stale-while-revalidate=30, stale-if-error=x",
+		"max-age=60", "public, max-age=60, s-maxage=\"120\"", "no-cache=\"Set-Cookie, X-A\", private=\"X-B\"",
+		"max-age=99999999999999999999", "max-age=-1", "max-age=1, max-age=2", "max-stale", "max-stale=5, min-fresh=3, only-if-cached",
+		"stale-while-revalidate=30, stale-if-error=x",
 		"private=\"a,b", ",,=,\"\"", "no-cache=\"\"", "",
 	} {
 		f.Add(seed)
@@ -142,8 +137,7 @@ func FuzzParseCacheControl(f *testing.F) {
 	})
 }
 
-// FuzzAcceptEncoding: whatever a client sends, it is only served codings the
-// cache knows, and none that it refuses.
+// FuzzAcceptEncoding: whatever a client sends, it is only served codings the cache knows, and none that it refuses.
 func FuzzAcceptEncoding(f *testing.F) {
 	for _, seed := range []string{
 		"gzip, br", "br;q=1.0, gzip;q=0.8, *;q=0.1", "*;q=0", "identity;q=0", "gzip;q=0, *", "zstd;q=0.000", "gzip;q=abc;q=0", ";;,,=", "",

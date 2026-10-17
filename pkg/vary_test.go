@@ -24,7 +24,11 @@ func TestVaryNames(t *testing.T) {
 		{name: "no Vary"},
 		{name: "empty Vary", vary: []string{" ", ","}},
 		{name: "one name", vary: []string{"Accept-Encoding"}, want: []string{"Accept-Encoding"}},
-		{name: "§4.1 names are case-insensitive, sorted and unique", vary: []string{"accept-language , ACCEPT-ENCODING", "Accept-Language"}, want: []string{"Accept-Encoding", "Accept-Language"}},
+		{
+			name: "§4.1 names are case-insensitive, sorted and unique",
+			vary: []string{"accept-language , ACCEPT-ENCODING", "Accept-Language"},
+			want: []string{"Accept-Encoding", "Accept-Language"},
+		},
 		{name: "§4.1 * never matches", vary: []string{"*"}, refuse: true},
 		{name: "§4.1 * among names", vary: []string{"Accept-Encoding, *"}, refuse: true},
 		{name: "Cookie is one variant per user", vary: []string{"Accept-Encoding, cookie"}, refuse: true},
@@ -238,12 +242,42 @@ func TestVariantListed(t *testing.T) {
 		want     []string
 	}{
 		{name: "first variant", coding: "br", accepted: []string{"br", "gzip"}, want: []string{"br"}},
-		{name: "added in the order of contentCodings", old: []string{"gzip", "identity"}, coding: "br", accepted: []string{"br"}, want: []string{"br", "gzip", "identity"}},
+		{
+			name:     "added in the order of contentCodings",
+			old:      []string{"gzip", "identity"},
+			coding:   "br",
+			accepted: []string{"br"},
+			want:     []string{"br", "gzip", "identity"},
+		},
 		{name: "already listed", old: []string{"br", "gzip"}, coding: "gzip", accepted: []string{"gzip"}, want: []string{"br", "gzip"}},
-		{name: "a coding the request does not accept is kept", old: []string{"zstd", "gzip"}, coding: "br", accepted: []string{"br", "gzip"}, want: []string{"zstd", "br", "gzip"}},
-		{name: "an accepted coding picked before this one is dropped", old: []string{"zstd", "br", "gzip"}, coding: "gzip", accepted: []string{"zstd", "gzip"}, want: []string{"br", "gzip"}},
-		{name: "an accepted coding picked after this one is kept", old: []string{"gzip", "identity"}, coding: "zstd", accepted: []string{"zstd", "gzip"}, want: []string{"zstd", "gzip", "identity"}},
-		{name: "identity drops every accepted coding", old: []string{"zstd", "br", "gzip"}, coding: "identity", accepted: []string{"br", "gzip"}, want: []string{"zstd", "identity"}},
+		{
+			name:     "a coding the request does not accept is kept",
+			old:      []string{"zstd", "gzip"},
+			coding:   "br",
+			accepted: []string{"br", "gzip"},
+			want:     []string{"zstd", "br", "gzip"},
+		},
+		{
+			name:     "an accepted coding picked before this one is dropped",
+			old:      []string{"zstd", "br", "gzip"},
+			coding:   "gzip",
+			accepted: []string{"zstd", "gzip"},
+			want:     []string{"br", "gzip"},
+		},
+		{
+			name:     "an accepted coding picked after this one is kept",
+			old:      []string{"gzip", "identity"},
+			coding:   "zstd",
+			accepted: []string{"zstd", "gzip"},
+			want:     []string{"zstd", "gzip", "identity"},
+		},
+		{
+			name:     "identity drops every accepted coding",
+			old:      []string{"zstd", "br", "gzip"},
+			coding:   "identity",
+			accepted: []string{"br", "gzip"},
+			want:     []string{"zstd", "identity"},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -265,29 +299,148 @@ func TestSelects(t *testing.T) {
 		want     bool
 	}{
 		{name: "no Vary", reqHdr: http.Header{"Accept-Language": {"fr"}}, want: true},
-		{name: "§4.1 same value", vary: "Accept-Language", selected: http.Header{"Accept-Language": {"fr"}}, reqHdr: http.Header{"Accept-Language": {" fr"}}, want: true},
-		{name: "§4.1 another value", vary: "Accept-Language", selected: http.Header{"Accept-Language": {"fr"}}, reqHdr: http.Header{"Accept-Language": {"en"}}},
+		{
+			name:     "§4.1 same value",
+			vary:     "Accept-Language",
+			selected: http.Header{"Accept-Language": {"fr"}},
+			reqHdr:   http.Header{"Accept-Language": {" fr"}},
+			want:     true,
+		},
+		{
+			name:     "§4.1 another value",
+			vary:     "Accept-Language",
+			selected: http.Header{"Accept-Language": {"fr"}},
+			reqHdr:   http.Header{"Accept-Language": {"en"}},
+		},
 		{name: "§4.1 absent in both", vary: "Accept-Language", selected: http.Header{}, reqHdr: http.Header{}, want: true},
-		{name: "§4.1 absent in the request only", vary: "Accept-Language", selected: http.Header{"Accept-Language": {"fr"}}, reqHdr: http.Header{}},
-		{name: "§4.1 absent in the stored request only", vary: "Accept-Language", selected: http.Header{}, reqHdr: http.Header{"Accept-Language": {""}}},
-		{name: "§4.1 every name must match", vary: "Accept-Language, X-Device", selected: http.Header{"Accept-Language": {"fr"}, "X-Device": {"tv"}}, reqHdr: http.Header{"Accept-Language": {"fr"}, "X-Device": {"phone"}}},
+		{
+			name:     "§4.1 absent in the request only",
+			vary:     "Accept-Language",
+			selected: http.Header{"Accept-Language": {"fr"}},
+			reqHdr:   http.Header{},
+		},
+		{
+			name:     "§4.1 absent in the stored request only",
+			vary:     "Accept-Language",
+			selected: http.Header{},
+			reqHdr:   http.Header{"Accept-Language": {""}},
+		},
+		{
+			name:     "§4.1 every name must match",
+			vary:     "Accept-Language, X-Device",
+			selected: http.Header{"Accept-Language": {"fr"}, "X-Device": {"tv"}},
+			reqHdr:   http.Header{"Accept-Language": {"fr"}, "X-Device": {"phone"}},
+		},
 		{name: "§4.1 * never matches", vary: "*", reqHdr: http.Header{}},
-		{name: "coding the request accepts", vary: "Accept-Encoding", encoding: "br", selected: http.Header{"Accept-Encoding": {"br,gzip"}}, reqHdr: http.Header{"Accept-Encoding": {"br"}}, want: true},
-		{name: "coding the request does not accept", vary: "Accept-Encoding", encoding: "br", selected: http.Header{"Accept-Encoding": {"br,gzip"}}, reqHdr: http.Header{"Accept-Encoding": {"gzip"}}},
-		{name: "coding refused by a zero weight", vary: "Accept-Encoding", encoding: "br", selected: http.Header{"Accept-Encoding": {"br"}}, reqHdr: http.Header{"Accept-Encoding": {"gzip, br;q=0"}}},
-		{name: "compressed without Accept-Encoding", vary: "Accept-Encoding", encoding: "gzip", selected: http.Header{"Accept-Encoding": {"gzip"}}, reqHdr: http.Header{}},
-		{name: "coding the cache does not know", vary: "Accept-Encoding", encoding: "compress", selected: http.Header{"Accept-Encoding": {""}}, reqHdr: http.Header{"Accept-Encoding": {"compress"}}},
-		{name: "identity: the request accepts the same codings", vary: "Accept-Encoding", selected: http.Header{"Accept-Encoding": {"br,gzip"}}, reqHdr: http.Header{"Accept-Encoding": {"gzip, br"}}, want: true},
-		{name: "identity: the request accepts fewer codings", vary: "Accept-Encoding", selected: http.Header{"Accept-Encoding": {"br,gzip"}}, reqHdr: http.Header{"Accept-Encoding": {"gzip"}}, want: true},
-		{name: "identity: the request accepts no coding", vary: "Accept-Encoding", selected: http.Header{"Accept-Encoding": {"br,gzip"}}, reqHdr: http.Header{}, want: true},
-		{name: "identity: the request accepts a coding the backend was not offered", vary: "Accept-Encoding", selected: http.Header{"Accept-Encoding": {"gzip"}}, reqHdr: http.Header{"Accept-Encoding": {"gzip, br"}}},
-		{name: "identity stored for a request without Accept-Encoding", vary: "Accept-Encoding", selected: http.Header{"Accept-Encoding": {""}}, reqHdr: http.Header{"Accept-Encoding": {"gzip"}}},
-		{name: "identity stored without its request codings", vary: "Accept-Encoding", selected: http.Header{}, reqHdr: http.Header{"Accept-Encoding": {"gzip"}}},
-		{name: "RFC 9110 §12.5.3 identity refused", vary: "Accept-Encoding", selected: http.Header{"Accept-Encoding": {"gzip"}}, reqHdr: http.Header{"Accept-Encoding": {"gzip, identity;q=0"}}},
-		{name: "RFC 9110 §12.5.3 identity refused by *;q=0", vary: "Accept-Encoding", selected: http.Header{"Accept-Encoding": {"gzip"}}, reqHdr: http.Header{"Accept-Encoding": {"gzip, *;q=0"}}},
-		{name: "RFC 9110 §12.5.3 identity listed with *;q=0", vary: "Accept-Encoding", selected: http.Header{"Accept-Encoding": {"gzip"}}, reqHdr: http.Header{"Accept-Encoding": {"identity, *;q=0"}}, want: true},
-		{name: "RFC 9110 §12.5.3 identity refused, coding accepted", vary: "Accept-Encoding", encoding: "br", selected: http.Header{"Accept-Encoding": {"br"}}, reqHdr: http.Header{"Accept-Encoding": {"br, identity;q=0"}}, want: true},
-		{name: "coding and another header", vary: "Accept-Encoding, Accept-Language", encoding: "gzip", selected: http.Header{"Accept-Encoding": {"gzip"}, "Accept-Language": {"fr"}}, reqHdr: http.Header{"Accept-Encoding": {"gzip"}, "Accept-Language": {"en"}}},
+		{
+			name:     "coding the request accepts",
+			vary:     "Accept-Encoding",
+			encoding: "br",
+			selected: http.Header{"Accept-Encoding": {"br,gzip"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"br"}},
+			want:     true,
+		},
+		{
+			name:     "coding the request does not accept",
+			vary:     "Accept-Encoding",
+			encoding: "br",
+			selected: http.Header{"Accept-Encoding": {"br,gzip"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"gzip"}},
+		},
+		{
+			name:     "coding refused by a zero weight",
+			vary:     "Accept-Encoding",
+			encoding: "br",
+			selected: http.Header{"Accept-Encoding": {"br"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"gzip, br;q=0"}},
+		},
+		{
+			name:     "compressed without Accept-Encoding",
+			vary:     "Accept-Encoding",
+			encoding: "gzip",
+			selected: http.Header{"Accept-Encoding": {"gzip"}},
+			reqHdr:   http.Header{},
+		},
+		{
+			name:     "coding the cache does not know",
+			vary:     "Accept-Encoding",
+			encoding: "compress",
+			selected: http.Header{"Accept-Encoding": {""}},
+			reqHdr:   http.Header{"Accept-Encoding": {"compress"}},
+		},
+		{
+			name:     "identity: the request accepts the same codings",
+			vary:     "Accept-Encoding",
+			selected: http.Header{"Accept-Encoding": {"br,gzip"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"gzip, br"}},
+			want:     true,
+		},
+		{
+			name:     "identity: the request accepts fewer codings",
+			vary:     "Accept-Encoding",
+			selected: http.Header{"Accept-Encoding": {"br,gzip"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"gzip"}},
+			want:     true,
+		},
+		{
+			name:     "identity: the request accepts no coding",
+			vary:     "Accept-Encoding",
+			selected: http.Header{"Accept-Encoding": {"br,gzip"}},
+			reqHdr:   http.Header{},
+			want:     true,
+		},
+		{
+			name:     "identity: the request accepts a coding the backend was not offered",
+			vary:     "Accept-Encoding",
+			selected: http.Header{"Accept-Encoding": {"gzip"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"gzip, br"}},
+		},
+		{
+			name:     "identity stored for a request without Accept-Encoding",
+			vary:     "Accept-Encoding",
+			selected: http.Header{"Accept-Encoding": {""}},
+			reqHdr:   http.Header{"Accept-Encoding": {"gzip"}},
+		},
+		{
+			name:     "identity stored without its request codings",
+			vary:     "Accept-Encoding",
+			selected: http.Header{},
+			reqHdr:   http.Header{"Accept-Encoding": {"gzip"}},
+		},
+		{
+			name:     "RFC 9110 §12.5.3 identity refused",
+			vary:     "Accept-Encoding",
+			selected: http.Header{"Accept-Encoding": {"gzip"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"gzip, identity;q=0"}},
+		},
+		{
+			name:     "RFC 9110 §12.5.3 identity refused by *;q=0",
+			vary:     "Accept-Encoding",
+			selected: http.Header{"Accept-Encoding": {"gzip"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"gzip, *;q=0"}},
+		},
+		{
+			name:     "RFC 9110 §12.5.3 identity listed with *;q=0",
+			vary:     "Accept-Encoding",
+			selected: http.Header{"Accept-Encoding": {"gzip"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"identity, *;q=0"}},
+			want:     true,
+		},
+		{
+			name:     "RFC 9110 §12.5.3 identity refused, coding accepted",
+			vary:     "Accept-Encoding",
+			encoding: "br",
+			selected: http.Header{"Accept-Encoding": {"br"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"br, identity;q=0"}},
+			want:     true,
+		},
+		{
+			name:     "coding and another header",
+			vary:     "Accept-Encoding, Accept-Language",
+			encoding: "gzip",
+			selected: http.Header{"Accept-Encoding": {"gzip"}, "Accept-Language": {"fr"}},
+			reqHdr:   http.Header{"Accept-Encoding": {"gzip"}, "Accept-Language": {"en"}},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -305,9 +458,8 @@ func TestSelects(t *testing.T) {
 	}
 }
 
-// negotiator is an origin whose response depends on the request headers named
-// by its Vary: it echoes Accept-Language and compresses with the first of its
-// codings that the request accepts.
+// negotiator is an origin whose response depends on the request headers named by its Vary: it echoes Accept-Language and compresses with
+// the first of its codings that the request accepts.
 type negotiator struct {
 	vary    string
 	codings []string
@@ -372,8 +524,18 @@ func TestVariants(t *testing.T) {
 		{name: "the first variant is still there", reqHdr: http.Header{"Accept-Language": {"fr"}}, wantStatus: "hit", wantBody: "lang=fr"},
 		{name: "§4.1 absent header", reqHdr: http.Header{}, wantStatus: varyMiss, wantBody: "lang="},
 		{name: "§4.1 absent header has its variant", reqHdr: http.Header{}, wantStatus: "hit", wantBody: "lang="},
-		{name: "§4.1 whitespace is not part of the value", reqHdr: http.Header{"Accept-Language": {" fr "}}, wantStatus: "hit", wantBody: "lang=fr"},
-		{name: "other request headers don't matter", reqHdr: http.Header{"Accept-Language": {"en"}, "Accept-Encoding": {"gzip"}, "User-Agent": {"curl"}}, wantStatus: "hit", wantBody: "lang=en"},
+		{
+			name:       "§4.1 whitespace is not part of the value",
+			reqHdr:     http.Header{"Accept-Language": {" fr "}},
+			wantStatus: "hit",
+			wantBody:   "lang=fr",
+		},
+		{
+			name:       "other request headers don't matter",
+			reqHdr:     http.Header{"Accept-Language": {"en"}, "Accept-Encoding": {"gzip"}, "User-Agent": {"curl"}},
+			wantStatus: "hit",
+			wantBody:   "lang=en",
+		},
 	}
 	for _, step := range steps {
 		rec := doRequest(c, http.MethodGet, varyURL, step.reqHdr)
@@ -392,8 +554,7 @@ func TestVariants(t *testing.T) {
 		t.Errorf("backend calls = %d, want 3", b.calls)
 	}
 
-	// One hash per URI: the marker in field "", two fields per variant (its
-	// entry and its body).
+	// One hash per URI: the marker in field "", two fields per variant (its entry and its body).
 	key := cacheKey(varyURL)
 	if m := storedMarker(t, st); !sameStrings(m.names, []string{"Accept-Language"}) || len(m.codings) != 0 {
 		t.Errorf("marker = %+v", m)
@@ -432,7 +593,10 @@ func TestHeadIsServedFromVariant(t *testing.T) {
 
 	rec := doRequest(c, http.MethodHead, varyURL, fr)
 	if b.calls != 1 || !isHit(lastCacheStatus(rec)) || rec.Body.Len() != 0 || rec.Header().Get("Content-Length") != "7" {
-		t.Errorf("HEAD: Cache-Status %q, Content-Length %q (backend calls %d)", lastCacheStatus(rec), rec.Header().Get("Content-Length"), b.calls)
+		t.Errorf(
+			"HEAD: Cache-Status %q, Content-Length %q (backend calls %d)",
+			lastCacheStatus(rec), rec.Header().Get("Content-Length"), b.calls,
+		)
 	}
 	rec = doRequest(c, http.MethodHead, varyURL, http.Header{"Accept-Language": {"en"}})
 	if b.calls != 2 || lastCacheStatus(rec) != varyMiss {
@@ -451,8 +615,7 @@ func TestOnlyIfCachedVaryMissIs504(t *testing.T) {
 	}
 }
 
-// Variants of a response varying by Accept-Encoding are stored by content
-// coding and shared by all the requests accepting it.
+// Variants of a response varying by Accept-Encoding are stored by content coding and shared by all the requests accepting it.
 func TestVariantsByContentCoding(t *testing.T) {
 	b := &negotiator{vary: "Accept-Encoding", codings: []string{"br", "gzip"}}
 	c, st := newTestCache(t, b, nil)
@@ -463,16 +626,46 @@ func TestVariantsByContentCoding(t *testing.T) {
 		wantCoding  string
 		wantCodings []string // listed by the marker afterwards
 	}{
-		{name: "a browser gets what the backend chose", accept: "gzip, deflate, br, zstd", wantStatus: uriMiss, wantCoding: "br", wantCodings: []string{"br"}},
+		{
+			name:        "a browser gets what the backend chose",
+			accept:      "gzip, deflate, br, zstd",
+			wantStatus:  uriMiss,
+			wantCoding:  "br",
+			wantCodings: []string{"br"},
+		},
 		{name: "same request", accept: "gzip, deflate, br, zstd", wantStatus: "hit", wantCoding: "br", wantCodings: []string{"br"}},
-		{name: "another Accept-Encoding accepting the stored coding", accept: "br", wantStatus: "hit", wantCoding: "br", wantCodings: []string{"br"}},
-		{name: "a request that does not accept the stored coding", accept: "gzip", wantStatus: varyMiss, wantCoding: "gzip", wantCodings: []string{"br", "gzip"}},
+		{
+			name:        "another Accept-Encoding accepting the stored coding",
+			accept:      "br",
+			wantStatus:  "hit",
+			wantCoding:  "br",
+			wantCodings: []string{"br"},
+		},
+		{
+			name:        "a request that does not accept the stored coding",
+			accept:      "gzip",
+			wantStatus:  varyMiss,
+			wantCoding:  "gzip",
+			wantCodings: []string{"br", "gzip"},
+		},
 		{name: "second coding stored", accept: "gzip", wantStatus: "hit", wantCoding: "gzip", wantCodings: []string{"br", "gzip"}},
-		{name: "first of contentCodings among the accepted ones", accept: "gzip, br", wantStatus: "hit", wantCoding: "br", wantCodings: []string{"br", "gzip"}},
+		{
+			name:        "first of contentCodings among the accepted ones",
+			accept:      "gzip, br",
+			wantStatus:  "hit",
+			wantCoding:  "br",
+			wantCodings: []string{"br", "gzip"},
+		},
 		{name: "q=0 refuses a coding", accept: "br;q=0, gzip", wantStatus: "hit", wantCoding: "gzip", wantCodings: []string{"br", "gzip"}},
 		{name: "no Accept-Encoding never gets a compressed variant", wantStatus: varyMiss, wantCodings: []string{"br", "gzip", "identity"}},
 		{name: "uncompressed variant stored", wantStatus: "hit", wantCodings: []string{"br", "gzip", "identity"}},
-		{name: "compressed variants are picked before identity", accept: "zstd, gzip", wantStatus: "hit", wantCoding: "gzip", wantCodings: []string{"br", "gzip", "identity"}},
+		{
+			name:        "compressed variants are picked before identity",
+			accept:      "zstd, gzip",
+			wantStatus:  "hit",
+			wantCoding:  "gzip",
+			wantCodings: []string{"br", "gzip", "identity"},
+		},
 	}
 	for _, step := range steps {
 		h := http.Header{}
@@ -502,8 +695,7 @@ func TestVariantsByContentCoding(t *testing.T) {
 	}
 }
 
-// An uncompressed response is only served to the requests that accept no more
-// codings than the one it was stored for.
+// An uncompressed response is only served to the requests that accept no more codings than the one it was stored for.
 func TestUncompressedVariant(t *testing.T) {
 	gzipBr := http.Header{"Accept-Encoding": {"gzip, br"}}
 
@@ -515,7 +707,10 @@ func TestUncompressedVariant(t *testing.T) {
 		}
 		rec := doRequest(c, http.MethodGet, varyURL, gzipBr)
 		if lastCacheStatus(rec) != varyMiss || rec.Header().Get("Content-Encoding") != "br" {
-			t.Errorf("the backend may compress for this request: got %q, Content-Encoding %q", lastCacheStatus(rec), rec.Header().Get("Content-Encoding"))
+			t.Errorf(
+				"the backend may compress for this request: got %q, Content-Encoding %q",
+				lastCacheStatus(rec), rec.Header().Get("Content-Encoding"),
+			)
 		}
 		rec = doRequest(c, http.MethodGet, varyURL, gzipBr)
 		if !isHit(lastCacheStatus(rec)) || rec.Header().Get("Content-Encoding") != "br" || b.calls != 2 {
@@ -560,8 +755,7 @@ func TestUncompressedVariant(t *testing.T) {
 	})
 }
 
-// A coding that the backend no longer answers with must not hide the variant
-// it answers with now.
+// A coding that the backend no longer answers with must not hide the variant it answers with now.
 func TestOutdatedCodingIsUnlisted(t *testing.T) {
 	tests := []struct {
 		name string
@@ -638,7 +832,8 @@ func TestVaryAcceptEncodingAndAnotherHeader(t *testing.T) {
 			t.Errorf("step %d: got %q %q, want %q (hit = %v)", i, lastCacheStatus(rec), rec.Body.String(), want, step.hit)
 		}
 	}
-	if m := storedMarker(t, st); !sameStrings(m.names, []string{"Accept-Encoding", "Accept-Language"}) || !sameStrings(m.codings, []string{"gzip", "identity"}) {
+	if m := storedMarker(t, st); !sameStrings(m.names, []string{"Accept-Encoding", "Accept-Language"}) ||
+		!sameStrings(m.codings, []string{"gzip", "identity"}) {
 		t.Errorf("marker = %+v", m)
 	}
 }
@@ -688,8 +883,7 @@ func TestVariantsAreCapped(t *testing.T) {
 	}
 }
 
-// Lowering maxVariants evicts nothing: the key takes no new variant until
-// enough of its fields expire.
+// Lowering maxVariants evicts nothing: the key takes no new variant until enough of its fields expire.
 func TestMaxVariantsLowered(t *testing.T) {
 	b := &negotiator{vary: "Accept-Language"}
 	c, st := newTestCache(t, b, nil)
@@ -948,8 +1142,12 @@ func TestStaleVariantIsRevalidated(t *testing.T) {
 	at := time.Now().Add(-70 * time.Second)
 	stale := func(lang string) (string, *entry) {
 		e := &entry{
-			status:      200,
-			header:      http.Header{"Cache-Control": {"max-age=60, stale-while-revalidate=30"}, "Vary": {b.vary}, "Content-Encoding": {"gzip"}},
+			status: 200,
+			header: http.Header{
+				"Cache-Control":    {"max-age=60, stale-while-revalidate=30"},
+				"Vary":             {b.vary},
+				"Content-Encoding": {"gzip"},
+			},
 			body:        []byte("old " + lang),
 			vary:        http.Header{"Accept-Language": {lang}, "Accept-Encoding": {"gzip"}},
 			requestTime: at, responseTime: at,
@@ -981,7 +1179,8 @@ func TestStaleVariantIsRevalidated(t *testing.T) {
 	}
 
 	rec = doRequest(c, http.MethodGet, varyURL, http.Header{"Accept-Language": {"fr"}, "Accept-Encoding": {"gzip"}})
-	if b.calls != 1 || rec.Body.String() != "lang=fr coding=gzip" || !isHit(lastCacheStatus(rec)) || isStaleWhileRevalidate(lastCacheStatus(rec)) {
+	if b.calls != 1 || rec.Body.String() != "lang=fr coding=gzip" || !isHit(lastCacheStatus(rec)) ||
+		isStaleWhileRevalidate(lastCacheStatus(rec)) {
 		t.Errorf("after revalidation: %q %q (backend calls %d)", rec.Body.String(), lastCacheStatus(rec), b.calls)
 	}
 	// The other variant was left as it was.
@@ -1062,8 +1261,7 @@ func TestStaleIfErrorServesTheVariant(t *testing.T) {
 	}
 }
 
-// One round trip per hit, variants included: the marker last seen in a key
-// tells which variant to ask for along with it.
+// One round trip per hit, variants included: the marker last seen in a key tells which variant to ask for along with it.
 func TestVariantIsReadInOneRoundTrip(t *testing.T) {
 	b := &negotiator{vary: "Accept-Language"}
 	c, st := newTestCache(t, b, honourClientCacheControl)

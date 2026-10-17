@@ -23,19 +23,15 @@ type headerHook interface {
 	beforeHeader(status int, h http.Header) disposition
 }
 
-// recorder streams a response to the client while keeping a copy of at most max
-// body bytes. It never alters the stream: past max, or when its budget has
-// no room left for the copy (see holdCopy), it stops buffering. It
-// preserves http.Flusher, http.Hijacker and trailers (Header is the underlying map).
-// A withheld response is dropped instead: nothing of it is sent, but what the
-// backend put in the header stays there.
+// recorder streams a response to the client while keeping a copy of at most max body bytes. It never alters the stream: past max, or when
+// its budget has no room left for the copy (see holdCopy), it stops buffering. It preserves http.Flusher, http.Hijacker and trailers
+// (Header is the underlying map). A withheld response is dropped instead: nothing of it is sent, but what the backend put in the header
+// stays there.
 //
-// It never holds back a response that streams. Yaegi v0.16.1 hides
-// http.Flusher from compiled code, which cannot ask for a flush any more: the
-// recorder flushes by itself the header and every write of a response of
-// unknown length. One with a Content-Length is left to the buffers of the
-// server: flushing it would only make a compress middleware placed before the
-// cache compress the responses it finds too small.
+// It never holds back a response that streams. Yaegi v0.16.1 hides http.Flusher from compiled code, which cannot ask for a flush any more:
+// the recorder flushes by itself the header and every write of a response of unknown length. One with a Content-Length is left to the
+// buffers of the server: flushing it would only make a compress middleware placed before the cache compress the responses it finds too
+// small.
 type recorder struct {
 	rw          http.ResponseWriter
 	hook        headerHook
@@ -47,9 +43,8 @@ type recorder struct {
 	streams     bool // unknown length: flushed as it is written
 	hijacked    bool
 	buf         bytes.Buffer
-	// bodies is the memory budget the copy takes from, none when nil, and
-	// held what it holds of it (see holdCopy): given back when the copy is
-	// dropped, or by whoever takes it (see release).
+	// bodies is the memory budget the copy takes from, none when nil, and held what it holds of it (see holdCopy): given back when the copy
+	// is dropped, or by whoever takes it (see release).
 	bodies *budget
 	held   int64
 }
@@ -111,10 +106,9 @@ func (r *recorder) Write(p []byte) (int, error) {
 	return n, err
 }
 
-// keepWritten adds p, what was just written, to the copy of r, or drops the
-// copy: after a failed write, past max, or past what its budget has room for.
-// It is not part of Write: under Yaegi, the code of a function costs at every
-// call, run or not, and most writes are not copied.
+// keepWritten adds p, what was just written, to the copy of r, or drops the copy: after a failed write, past max, or past what its budget
+// has room for. It is not part of Write: under Yaegi, the code of a function costs at every call, run or not, and most writes are not
+// copied.
 func keepWritten(r *recorder, p []byte, err error) {
 	size := int64(r.buf.Len() + len(p))
 	if err != nil || size > r.max || (size > r.held && size > smallBody && !holdCopy(r, size)) {
@@ -130,8 +124,7 @@ func (r *recorder) stopCapture() {
 	r.release()
 }
 
-// release gives back what the copy holds of the budget: once it is dropped,
-// or once it is no longer needed by whoever took it from body.
+// release gives back what the copy holds of the budget: once it is dropped, or once it is no longer needed by whoever took it from body.
 func (r *recorder) release() {
 	giveBytes(r.bodies, r.held)
 	r.held = 0
@@ -172,9 +165,8 @@ func (r *recorder) Unwrap() http.ResponseWriter {
 	return r.rw
 }
 
-// body returns the captured body, and false when the response was not fully
-// captured (not wanted, too large, write error or hijacked) or is incomplete
-// (§3.3): not as long as its Content-Length says.
+// body returns the captured body, and false when the response was not fully captured (not wanted, too large, write error or hijacked) or is
+// incomplete (§3.3): not as long as its Content-Length says.
 func (r *recorder) body() ([]byte, bool) {
 	if !r.capture || r.hijacked {
 		return nil, false

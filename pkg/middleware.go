@@ -12,15 +12,13 @@ import (
 	"time"
 )
 
-// entryOverhead bounds an encoded entry, the header and metadata of a stored
-// response: its body, stored apart, is bounded by maxBodyBytes.
+// entryOverhead bounds an encoded entry, the header and metadata of a stored response: its body, stored apart, is bounded by maxBodyBytes.
 const entryOverhead = 1 << 20
 
 // cache is the middleware handler.
 type cache struct {
 	next http.Handler
-	// name is the one Traefik gives the middleware ("cache@file"): part of its
-	// Redis keys (see redisKey) and of its log lines.
+	// name is the one Traefik gives the middleware ("cache@file"): part of its Redis keys (see redisKey) and of its log lines.
 	name    string
 	cfg     settings
 	store   store
@@ -39,13 +37,11 @@ type cache struct {
 type pendingWrite struct {
 	done chan struct{} // closed once it has run
 	held int64         // what the body it writes holds of the memory budget
-	// invalidated is set, under writeMu, when an unsafe request invalidated
-	// the key in the meantime: what is written must not stay.
+	// invalidated is set, under writeMu, when an unsafe request invalidated the key in the meantime: what is written must not stay.
 	invalidated bool
 }
 
-// New creates the middleware. It never contacts Redis: Traefik must start even
-// when Redis is unreachable.
+// New creates the middleware. It never contacts Redis: Traefik must start even when Redis is unreachable.
 func New(_ context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 	cfg, err := parseConfig(config)
 	if err != nil {
@@ -83,10 +79,9 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if c.cfg.exposeKey {
 		status.key = key
 	}
-	// Request directives are advisory (§5.2.1). Honoured, they let any client
-	// replace the stored response with what the backend answers to its own
-	// request (no-cache, max-age, min-fresh), read stale responses (max-stale)
-	// and tell what others requested without a trace (only-if-cached).
+	// Request directives are advisory (§5.2.1). Honoured, they let any client replace the stored response with what the backend answers to
+	// its own request (no-cache, max-age, min-fresh), read stale responses (max-stale) and tell what others requested without a trace
+	// (only-if-cached).
 	reqCC := parseCacheControl(nil)
 	if !c.cfg.ignoreClientCacheControl {
 		reqCC = parseCacheControl(r.Header.Values("Cache-Control"))
@@ -98,8 +93,7 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// What the previous response for this URL had to store comes first (see
-	// later). Read here, not by a method: see find.
+	// What the previous response for this URL had to store comes first (see later). Read here, not by a method: see find.
 	c.writeMu.Lock()
 	pending := c.writing[key]
 	c.writeMu.Unlock()
@@ -107,8 +101,7 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		await(r.Context(), pending.done, c.cfg.redis.dialTimeout)
 	}
 
-	// The body is only read along with the entry when the answer is sure to
-	// have it: neither a HEAD nor a possible 304 (see ready).
+	// The body is only read along with the entry when the answer is sure to have it: neither a HEAD nor a possible 304 (see ready).
 	withBody := r.Method == http.MethodGet && !conditional(r.Header)
 	stored, field, miss, err := c.find(r.Context(), key, r.Header, withBody)
 	if err != nil {
@@ -137,8 +130,7 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		// Small bodies are not counted: no call for them (see budget).
 		if usable && stored.size > smallBody && !holdBody(c.bodies, r, stored) {
-			// The bodies held in memory leave no room for this one: it is not
-			// sent from the cache (see budget).
+			// The bodies held in memory leave no room for this one: it is not sent from the cache (see budget).
 			status.fwd = "bypass"
 			status.detail = "memory"
 			c.forward(w, r, key, "", reqCC, status, false, nil)
@@ -162,13 +154,11 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			stored = nil
 		} else {
 			if stored.body != nil && stored.size > smallBody && !holdBody(c.bodies, r, stored) {
-				// Read along with its entry, the body would wait for the
-				// backend outside of the budget: it is read again if needed
-				// (see ready).
+				// Read along with its entry, the body would wait for the backend outside of the budget: it is read again if needed (see
+				// ready).
 				stored.body = nil
 			}
-			// RFC 9211 §2.2: the response is stale, or fresh but not what the
-			// request asks for (max-age, min-fresh).
+			// RFC 9211 §2.2: the response is stale, or fresh but not what the request asks for (max-age, min-fresh).
 			status.fwd = "stale"
 			if age < lifetime {
 				status.fwd = "request"
@@ -178,22 +168,19 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.forward(w, r, key, field, reqCC, status, true, stored)
 }
 
-// find returns the stored response of key selected by the request header h
-// (§4.1) and the field it is in, or none. miss is then why: uri-miss, or
-// vary-miss when the key holds variants. An error is a Redis failure.
+// find returns the stored response of key selected by the request header h (§4.1) and the field it is in, or none. miss is then why:
+// uri-miss, or vary-miss when the key holds variants. An error is a Redis failure.
 //
-// The field "" of the key tells where the response is: it is the entry itself,
-// or the marker that selects a variant. One round trip is enough when the
-// marker is the one last seen there (see markers): the variant it selects is
-// asked for along with it. A wrong guess takes a second one.
+// The field "" of the key tells where the response is: it is the entry itself, or the marker that selects a variant. One round trip is
+// enough when the marker is the one last seen there (see markers): the variant it selects is asked for along with it. A wrong guess takes a
+// second one.
 //
-// With withBody, the body is read along with the entry. Otherwise it is left
-// in the store, for ready to read if the answer turns out to have one.
+// With withBody, the body is read along with the entry. Otherwise it is left in the store, for ready to read if the answer turns out to
+// have one.
 func (c *cache) find(ctx context.Context, key string, h http.Header, withBody bool) (*entry, string, string, error) {
 	a := &accepts{header: h}
 	miss := "uri-miss"
-	// Read here, not by a method of markers: under Yaegi, the call would cost
-	// several times the lookup.
+	// Read here, not by a method of markers: under Yaegi, the call would cost several times the lookup.
 	c.markers.mu.Lock()
 	known, varies := c.markers.known[key]
 	c.markers.mu.Unlock()
@@ -222,8 +209,7 @@ func (c *cache) find(ctx context.Context, key string, h http.Header, withBody bo
 		}
 		if !varies || string(values[0]) != known.raw {
 			if mk, ok := decodeMarker(values[0]); ok || varies {
-				// Wrong guess: the key has another marker, or one where it had
-				// none, or none any more. (Two assignments: Yaegi v0.16.1 gets
+				// Wrong guess: the key has another marker, or one where it had none, or none any more. (Two assignments: Yaegi v0.16.1 gets
 				// the parallel one wrong.)
 				known = knownMarker{raw: string(values[0]), marker: mk}
 				varies = ok
@@ -233,8 +219,7 @@ func (c *cache) find(ctx context.Context, key string, h http.Header, withBody bo
 			}
 		}
 
-		// The entry is in field "", or in the field of its own that the marker
-		// selects, if any.
+		// The entry is in field "", or in the field of its own that the marker selects, if any.
 		at := 0
 		if varies {
 			at = 1
@@ -258,11 +243,9 @@ func (c *cache) find(ctx context.Context, key string, h http.Header, withBody bo
 	return nil, "", miss, nil
 }
 
-// ready reports whether e, the entry of field, can answer r: its body is read
-// from the store now, when find left it there and the answer has one. It is
-// not when the store no longer has the entry as it was read: the body there
-// may be the one of another response. Nor is it when the memory budget has no
-// room for the body (see holdBody): whoever got e lets it go once served.
+// ready reports whether e, the entry of field, can answer r: its body is read from the store now, when find left it there and the answer
+// has one. It is not when the store no longer has the entry as it was read: the body there may be the one of another response. Nor is it
+// when the memory budget has no room for the body (see holdBody): whoever got e lets it go once served.
 func (c *cache) ready(r *http.Request, key, field string, e *entry) bool {
 	if e.size == 0 || !sendsBody(r, e) {
 		return true
@@ -282,10 +265,8 @@ func (c *cache) ready(r *http.Request, key, field string, e *entry) bool {
 	return true
 }
 
-// passThrough proxies a request the cache has nothing to do with (OPTIONS,
-// TRACE, upgrades, event streams), without wrapping the writer (Yaegi would
-// hide http.Flusher from the backend). Cache-Status is set before the
-// backend's own values.
+// passThrough proxies a request the cache has nothing to do with (OPTIONS, TRACE, upgrades, event streams), without wrapping the writer
+// (Yaegi would hide http.Flusher from the backend). Cache-Status is set before the backend's own values.
 func (c *cache) passThrough(w http.ResponseWriter, r *http.Request, fwd string) {
 	if c.cfg.exposeCacheStatus {
 		w.Header().Add("Cache-Status", cacheStatus{fwd: fwd}.String())
@@ -293,8 +274,7 @@ func (c *cache) passThrough(w http.ResponseWriter, r *http.Request, fwd string) 
 	c.next.ServeHTTP(w, r)
 }
 
-// expectsStream reports requests whose responses must be flushed as they come:
-// they are never wrapped (see passThrough).
+// expectsStream reports requests whose responses must be flushed as they come: they are never wrapped (see passThrough).
 func expectsStream(r *http.Request) bool {
 	if r.Header.Get("Upgrade") != "" {
 		return true
@@ -307,25 +287,22 @@ func expectsStream(r *http.Request) bool {
 	return false
 }
 
-// hasBody reports whether a request has content: a length, or chunks (-1). In
-// a GET or a HEAD, it has no defined semantics (RFC 9110 §9.3.1), but some
-// backends read parameters in it, which the cache key does not have: such a
-// request is neither answered from the cache nor has its response stored.
+// hasBody reports whether a request has content: a length, or chunks (-1). In a GET or a HEAD, it has no defined semantics (RFC 9110
+// §9.3.1), but some backends read parameters in it, which the cache key does not have: such a request is neither answered from the cache
+// nor has its response stored.
 func hasBody(r *http.Request) bool {
 	return r.ContentLength != 0
 }
 
-// serve answers from a stored entry (§4), fresh or stale: with a 304 when the
-// client says it already has it (§4.3.2), with the bytes it asks for when it
-// asks for some (see serveRange). The entry is ready for r (see ready).
+// serve answers from a stored entry (§4), fresh or stale: with a 304 when the client says it already has it (§4.3.2), with the bytes it
+// asks for when it asks for some (see serveRange). The entry is ready for r (see ready).
 func (c *cache) serve(w http.ResponseWriter, r *http.Request, e *entry, age, lifetime time.Duration, status cacheStatus) {
 	h := w.Header()
 	for name, values := range e.header {
 		h[name] = append([]string(nil), values...)
 	}
 	if e.header.Get("Date") == "" {
-		// RFC 9110 §6.6.1: a response received without Date gets the time it
-		// was received.
+		// RFC 9110 §6.6.1: a response received without Date gets the time it was received.
 		h.Set("Date", e.responseTime.UTC().Format(http.TimeFormat))
 	}
 	h.Set("Age", strconv.FormatInt(int64(age/time.Second), 10))
@@ -363,15 +340,15 @@ func sendsBody(r *http.Request, e *entry) bool {
 	return e.status != http.StatusOK || !notModified(r.Header, e.header, e.responseTime)
 }
 
-// forward proxies the request to the backend and stores the response when
-// allowed. stored is the entry of field that could not be served, if any: the
-// backend is asked whether it is still current (§4.3), and it answers in place
-// of a backend error when stale-if-error allows it (RFC 5861 §4). What its
-// body holds of the memory budget is given back once the request is served.
-func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field string, reqCC cacheControl, status cacheStatus, mayStore bool, stored *entry) {
+// forward proxies the request to the backend and stores the response when allowed. stored is the entry of field that could not be served,
+// if any: the backend is asked whether it is still current (§4.3), and it answers in place of a backend error when stale-if-error allows it
+// (RFC 5861 §4). What its body holds of the memory budget is given back once the request is served.
+func (c *cache) forward(
+	w http.ResponseWriter, r *http.Request, key, field string, reqCC cacheControl, status cacheStatus, mayStore bool, stored *entry,
+) {
 	if reqCC.onlyIfCached {
-		// §5.2.1.7: no stored response may be used. This response is our own
-		// and the request is not forwarded: no Cache-Status (RFC 9211 §2).
+		// §5.2.1.7: no stored response may be used. This response is our own and the request is not forwarded: no Cache-Status (RFC 9211
+		// §2).
 		letGo(c.bodies, stored)
 		w.WriteHeader(http.StatusGatewayTimeout)
 		return
@@ -385,16 +362,13 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 		// What the header holds now, without what the backend will add to it.
 		before = w.Header().Clone()
 	}
-	// The request goes to the backend as it is, with its context and trace
-	// headers, unless a stored response is to be validated: its validators
-	// then take the place of the conditions of the client (§4.3.1).
+	// The request goes to the backend as it is, with its context and trace headers, unless a stored response is to be validated: its
+	// validators then take the place of the conditions of the client (§4.3.1).
 	out, validating := backendRequest(r, stored)
 	m.validating = validating
 	rec := newRecorder(w, m, c.cfg.maxBodyBytes, c.bodies)
-	// Deferred: the proxy of Traefik panics (http.ErrAbortHandler) when it
-	// cannot read all the body of the backend, which a client that goes away
-	// causes. What the bodies held would otherwise be lost to the budget for
-	// good, and the cache bypassed once all of it is.
+	// Deferred: the proxy of Traefik panics (http.ErrAbortHandler) when it cannot read all the body of the backend, which a client that
+	// goes away causes. What the bodies held would otherwise be lost to the budget for good, and the cache bypassed once all of it is.
 	defer giveBack(c.bodies, rec, m)
 	c.next.ServeHTTP(rec, out)
 	if !rec.wroteHeader {
@@ -411,8 +385,7 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 		return
 	}
 	if m.validated != nil {
-		// Nothing of the backend's 304 was sent: the stored response it
-		// validated is (§4.3.3), with its updated fields if it gets some
+		// Nothing of the backend's 304 was sent: the stored response it validated is (§4.3.3), with its updated fields if it gets some
 		// (§4.3.4), and with what the 304 has for this client only.
 		h := w.Header()
 		resetHeader(h, before)
@@ -430,8 +403,8 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 		return
 	}
 	if m.unusable {
-		// The 304 was about another response than the stored one (§4.3.4), which
-		// cannot answer: the backend is asked again, without its validators.
+		// The 304 was about another response than the stored one (§4.3.4), which cannot answer: the backend is asked again, without its
+		// validators.
 		resetHeader(w.Header(), before)
 		c.forward(w, r, key, field, reqCC, status, mayStore, nil)
 		return
@@ -449,27 +422,22 @@ func (c *cache) forward(w http.ResponseWriter, r *http.Request, key, field strin
 	}
 }
 
-// giveBack gives back to b what forward holds of it once the request is
-// served: the copy of the response that was not handed to a write, and the
-// body of the stored response, validated or not.
+// giveBack gives back to b what forward holds of it once the request is served: the copy of the response that was not handed to a write,
+// and the body of the stored response, validated or not.
 func giveBack(b *budget, rec *recorder, m *missHook) {
 	rec.release()
 	letGo(b, m.stored)
 	letGo(b, m.validated)
 }
 
-// later runs write, the store writes that the response to a request for key
-// calls for, once the request is served: a response is not complete for its
-// client until ServeHTTP returns, which must not wait for Redis. write only
-// uses what is its own by then: neither the request nor its writer.
+// later runs write, the store writes that the response to a request for key calls for, once the request is served: a response is not
+// complete for its client until ServeHTTP returns, which must not wait for Redis. write only uses what is its own by then: neither the
+// request nor its writer.
 //
-// The requests for key that follow wait for it (see ServeHTTP and unstore), so
-// that a response is stored before the next one is looked for. Writes are
-// bounded: one per key, and no more than Redis has connections. Past that,
-// write is not run: a later response is stored instead.
+// The requests for key that follow wait for it (see ServeHTTP and unstore), so that a response is stored before the next one is looked for.
+// Writes are bounded: one per key, and no more than Redis has connections. Past that, write is not run: a later response is stored instead.
 //
-// held is what the body that write stores holds of the memory budget: given
-// back once it has run, or at once when it does not.
+// held is what the body that write stores holds of the memory budget: given back once it has run, or at once when it does not.
 func (c *cache) later(key string, held int64, write func(ctx context.Context)) {
 	p := &pendingWrite{done: make(chan struct{}), held: held}
 	c.writeMu.Lock()
@@ -485,15 +453,13 @@ func (c *cache) later(key string, held int64, write func(ctx context.Context)) {
 	go c.write(key, p, write)
 }
 
-// write runs write for later. A method rather than a closure started by later:
-// with the closure, the tests hang under Yaegi v0.16.1.
+// write runs write for later. A method rather than a closure started by later: with the closure, the tests hang under Yaegi v0.16.1.
 func (c *cache) write(key string, p *pendingWrite, write func(ctx context.Context)) {
 	defer c.written(key, p)
 	write(context.Background())
 }
 
-// written ends the write to key. Nothing else recovers a panic in a goroutine
-// of ours: it must not take Traefik down.
+// written ends the write to key. Nothing else recovers a panic in a goroutine of ours: it must not take Traefik down.
 func (c *cache) written(key string, p *pendingWrite) {
 	if r := recover(); r != nil {
 		logf(os.Stderr, c.name, "panic while storing a response: %v", r)
@@ -509,8 +475,8 @@ func (c *cache) written(key string, p *pendingWrite) {
 	close(p.done)
 }
 
-// unstore removes key from the store (§4.4), after the write to it that is
-// running, if any: were it to end later, it is told to remove the key too.
+// unstore removes key from the store (§4.4), after the write to it that is running, if any: were it to end later, it is told to remove the
+// key too.
 func (c *cache) unstore(ctx context.Context, key string) error {
 	c.writeMu.Lock()
 	pending := c.writing[key]
@@ -524,8 +490,7 @@ func (c *cache) unstore(ctx context.Context, key string) error {
 	return c.store.invalidate(ctx, key)
 }
 
-// await waits for done to be closed, no longer than timeout nor than ctx.
-// Without a select statement: see redisClient.
+// await waits for done to be closed, no longer than timeout nor than ctx. Without a select statement: see redisClient.
 func await(ctx context.Context, done chan struct{}, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -535,16 +500,12 @@ func await(ctx context.Context, done chan struct{}, timeout time.Duration) {
 	})
 }
 
-// freshenWithHead applies the 200 response to a forwarded HEAD to the stored
-// GET response that could have answered it (§4.3.5): stored, the entry of
-// field, or the one the cache did not read because the request said no-cache.
-// The same response gets its fields. Another one leaves it as it is: §4.3.5
-// only says that it SHOULD be considered stale, and the HEAD of a client must
-// not evict a fresh entry (with a header field that changes the response of
-// the backend without being in Vary). A response with another content coding
-// is another variant: it says nothing of this one. Neither does a response
-// without validator: some backends answer a HEAD with next to no header, which
-// must not make a stale entry fresh.
+// freshenWithHead applies the 200 response to a forwarded HEAD to the stored GET response that could have answered it (§4.3.5): stored, the
+// entry of field, or the one the cache did not read because the request said no-cache. The same response gets its fields. Another one
+// leaves it as it is: §4.3.5 only says that it SHOULD be considered stale, and the HEAD of a client must not evict a fresh entry (with a
+// header field that changes the response of the backend without being in Vary). A response with another content coding is another variant:
+// it says nothing of this one. Neither does a response without validator: some backends answer a HEAD with next to no header, which must
+// not make a stale entry fresh.
 func (c *cache) freshenWithHead(ctx context.Context, r *http.Request, reqCC cacheControl, key, field string, stored *entry, m *missHook) {
 	h := m.headHeader
 	if stored == nil {
@@ -582,11 +543,9 @@ func resetHeader(h, before http.Header) {
 	}
 }
 
-// freshen stores e, the entry of field as a 304 or the response to a HEAD
-// refreshed it (§4.3.4, §4.3.5), in its field: its body stays where it is, for
-// as long. One that may no longer be stored is left as it was, stale or too
-// old for the request: refused because of the request of a client, it says
-// nothing of the stored one (see gone).
+// freshen stores e, the entry of field as a 304 or the response to a HEAD refreshed it (§4.3.4, §4.3.5), in its field: its body stays where
+// it is, for as long. One that may no longer be stored is left as it was, stale or too old for the request: refused because of the request
+// of a client, it says nothing of the stored one (see gone).
 func (c *cache) freshen(ctx context.Context, req *http.Request, reqCC cacheControl, key, field string, e *entry) {
 	cc := parseCacheControl(e.header.Values("Cache-Control"))
 	ttl, ok := storeTTL(req, reqCC, e, cc, c.cfg)
@@ -606,8 +565,8 @@ func (c *cache) freshen(ctx context.Context, req *http.Request, reqCC cacheContr
 	}
 }
 
-// toStore returns the fields to store the recorded response in, when the hook
-// allowed it and its body was fully captured: its entry and its body.
+// toStore returns the fields to store the recorded response in, when the hook allowed it and its body was fully captured: its entry and its
+// body.
 func (c *cache) toStore(rec *recorder, m *missHook) ([]fieldValue, bool) {
 	body, complete := rec.body()
 	if !complete || !m.store {
@@ -624,19 +583,16 @@ func (c *cache) toStore(rec *recorder, m *missHook) ([]fieldValue, bool) {
 	return []fieldValue{{name: field, value: data}, {name: bodyField(field), value: body}}, true
 }
 
-// put stores fields in key: what there is to write of the response that v
-// tells where to store, along with the marker of the key when it is a variant.
-// It reports whether Redis took them. Any Redis error ends it: nothing is
-// written to a failing Redis.
+// put stores fields in key: what there is to write of the response that v tells where to store, along with the marker of the key when it is
+// a variant. It reports whether Redis took them. Any Redis error ends it: nothing is written to a failing Redis.
 func (c *cache) put(ctx context.Context, key string, v variant, fields []fieldValue, ttl time.Duration) bool {
 	if v.field == "" {
 		return c.store.set(ctx, key, fields, ttl, false) == nil
 	}
 	mk := marker{names: v.names}
 	if v.coding != "" {
-		// The marker lists the codings stored so far. Reading it and writing it
-		// back is not atomic: a coding lost to a concurrent write is a miss for
-		// the requests it would serve, whose response lists it again.
+		// The marker lists the codings stored so far. Reading it and writing it back is not atomic: a coding lost to a concurrent write is
+		// a miss for the requests it would serve, whose response lists it again.
 		mk.codings = []string{v.coding}
 		values, err := c.store.get(ctx, key, []string{""})
 		if err != nil {
@@ -650,8 +606,7 @@ func (c *cache) put(ctx context.Context, key string, v variant, fields []fieldVa
 	if err != nil {
 		return false
 	}
-	// A full key (the marker and the two fields of each of maxVariants
-	// variants) only gets its variants replaced. The count is not atomic
+	// A full key (the marker and the two fields of each of maxVariants variants) only gets its variants replaced. The count is not atomic
 	// either: concurrent writes may exceed the limit by a few fields.
 	raw := encodeMarker(mk)
 	fields = append([]fieldValue{{name: "", value: raw}}, fields...)
@@ -667,8 +622,8 @@ func (c *cache) drop(ctx context.Context, key, field string) {
 	_ = c.store.del(ctx, key, []string{field, bodyField(field)})
 }
 
-// missHook decides, when the backend sends its final status, what becomes of
-// the response (sent, stored, replaced by a stale entry), and adds Cache-Status.
+// missHook decides, when the backend sends its final status, what becomes of the response (sent, stored, replaced by a stale entry), and
+// adds Cache-Status.
 type missHook struct {
 	c            *cache
 	req          *http.Request
@@ -683,12 +638,9 @@ type missHook struct {
 	ttl          time.Duration
 	variant      variant // where to store it
 
-	// stored is the entry that could not be served, if any.
-	// Validation (§4.3): validating is set when the backend got its
-	// validators. Its 304 gives validated, the entry to serve: with the
-	// fields of the 304 when updated is set (§4.3.4), as it was otherwise.
-	// own holds the fields of the 304 that are for this client only. A 304
-	// about another response is unusable.
+	// stored is the entry that could not be served, if any. Validation (§4.3): validating is set when the backend got its validators. Its
+	// 304 gives validated, the entry to serve: with the fields of the 304 when updated is set (§4.3.4), as it was otherwise. own holds the
+	// fields of the 304 that are for this client only. A 304 about another response is unusable.
 	stored     *entry
 	validating bool
 	validated  *entry
@@ -696,19 +648,17 @@ type missHook struct {
 	own        http.Header
 	unusable   bool
 
-	// head is set for a HEAD that may update the stored GET response
-	// (§4.3.5): headHeader is then the header of its 200 response.
+	// head is set for a HEAD that may update the stored GET response (§4.3.5): headHeader is then the header of its 200 response.
 	head       bool
 	headHeader http.Header
 
-	// stale-if-error: once staleIfError is set, stored replaces the backend
-	// error, with this age and freshness lifetime.
+	// stale-if-error: once staleIfError is set, stored replaces the backend error, with this age and freshness lifetime.
 	staleIfError bool
 	age          time.Duration
 	lifetime     time.Duration
 
-	// Background revalidation: gone is set when the response says that the
-	// resource is gone (see gone), which deletes the entry unless it is stored.
+	// Background revalidation: gone is set when the response says that the resource is gone (see gone), which deletes the entry unless it
+	// is stored.
 	revalidation bool
 	gone         bool
 }
@@ -720,8 +670,7 @@ func (m *missHook) beforeHeader(code int, h http.Header) disposition {
 			e := m.stored
 			if update {
 				e = refreshed(m.stored, h, m.requestTime, m.responseTime)
-				// It has the body of the stored response, and what that holds
-				// of the memory budget: forward lets it go.
+				// It has the body of the stored response, and what that holds of the memory budget: forward lets it go.
 				e.held = m.stored.held
 				m.stored.held = 0
 			}
@@ -733,8 +682,7 @@ func (m *missHook) beforeHeader(code int, h http.Header) disposition {
 				return withhold
 			}
 		}
-		// Not the stored response, or its body is gone (or has no room in
-		// memory). In the background, the entry is left as it is: the next
+		// Not the stored response, or its body is gone (or has no room in memory). In the background, the entry is left as it is: the next
 		// request validates it again.
 		m.unusable = true
 		return withhold

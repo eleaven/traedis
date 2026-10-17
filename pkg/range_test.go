@@ -32,10 +32,28 @@ func TestRangeFromStoredResponse(t *testing.T) {
 		// wantRange is the Content-Range of the answer.
 		wantRange string
 	}{
-		{name: "§14.1.2 first bytes", header: http.Header{"Range": {"bytes=0-3"}}, wantCode: 206, wantBody: "0123", wantRange: "bytes 0-3/10"},
-		{name: "§14.1.2 from an offset", header: http.Header{"Range": {"bytes=7-"}}, wantCode: 206, wantBody: "789", wantRange: "bytes 7-9/10"},
+		{
+			name:      "§14.1.2 first bytes",
+			header:    http.Header{"Range": {"bytes=0-3"}},
+			wantCode:  206,
+			wantBody:  "0123",
+			wantRange: "bytes 0-3/10",
+		},
+		{
+			name:      "§14.1.2 from an offset",
+			header:    http.Header{"Range": {"bytes=7-"}},
+			wantCode:  206,
+			wantBody:  "789",
+			wantRange: "bytes 7-9/10",
+		},
 		{name: "§14.1.2 last bytes", header: http.Header{"Range": {"bytes=-2"}}, wantCode: 206, wantBody: "89", wantRange: "bytes 8-9/10"},
-		{name: "§14.1.2 past the end", header: http.Header{"Range": {"bytes=8-100"}}, wantCode: 206, wantBody: "89", wantRange: "bytes 8-9/10"},
+		{
+			name:      "§14.1.2 past the end",
+			header:    http.Header{"Range": {"bytes=8-100"}},
+			wantCode:  206,
+			wantBody:  "89",
+			wantRange: "bytes 8-9/10",
+		},
 		{name: "§15.5.17 no such bytes", header: http.Header{"Range": {"bytes=10-20"}}, wantCode: 416, wantRange: "bytes */10"},
 		{name: "§14.2 another range unit is ignored", header: http.Header{"Range": {"lines=1-2"}}, wantCode: 200, wantBody: "0123456789"},
 		{name: "§14.2 only for a GET", method: http.MethodHead, header: http.Header{"Range": {"bytes=0-3"}}, wantCode: 200},
@@ -106,7 +124,9 @@ func TestRangeFromStoredResponse(t *testing.T) {
 				t.Fatalf("Cache-Status = %q, backend calls = %d, want a hit", lastCacheStatus(rec), b.calls)
 			}
 			if rec.Code != tt.wantCode || rec.Header().Get("Content-Range") != tt.wantRange {
-				t.Errorf("got %d with Content-Range %q, want %d with %q", rec.Code, rec.Header().Get("Content-Range"), tt.wantCode, tt.wantRange)
+				t.Errorf(
+					"got %d with Content-Range %q, want %d with %q", rec.Code, rec.Header().Get("Content-Range"), tt.wantCode, tt.wantRange,
+				)
 			}
 			if tt.wantCode == http.StatusRequestedRangeNotSatisfiable {
 				return
@@ -126,10 +146,8 @@ func TestRangeFromStoredResponse(t *testing.T) {
 
 // §14.6: several ranges come as the parts of a multipart/byteranges body.
 func TestRangeSeveralParts(t *testing.T) {
-	// Since Go 1.26.9, http.ServeContent ignores a Range header with more
-	// ranges than this, which is 1 for a module older than go 1.26 like this
-	// one. The test takes the default of a recent one (in Traefik, it is up to
-	// its build). An older Go ignores the setting.
+	// Since Go 1.26.9, http.ServeContent ignores a Range header with more ranges than this, which is 1 for a module older than go 1.26 like
+	// this one. The test takes the default of a recent one (in Traefik, it is up to its build). An older Go ignores the setting.
 	t.Setenv("GODEBUG", strings.TrimPrefix(os.Getenv("GODEBUG")+",httpservecontentmaxranges=200", ","))
 	b := rangeBackend()
 	c, _ := newTestCache(t, b, nil)
@@ -139,15 +157,18 @@ func TestRangeSeveralParts(t *testing.T) {
 		t.Fatalf("got %d %q", rec.Code, rec.Header().Get("Content-Type"))
 	}
 	body := rec.Body.String()
-	for _, part := range []string{"Content-Range: bytes 0-1/10\r\nContent-Type: text/plain\r\n\r\n01\r\n", "Content-Range: bytes 8-9/10\r\nContent-Type: text/plain\r\n\r\n89\r\n"} {
+	for _, part := range []string{
+		"Content-Range: bytes 0-1/10\r\nContent-Type: text/plain\r\n\r\n01\r\n",
+		"Content-Range: bytes 8-9/10\r\nContent-Type: text/plain\r\n\r\n89\r\n",
+	} {
 		if !strings.Contains(body, part) {
 			t.Errorf("body = %q, want it to contain %q", body, part)
 		}
 	}
 }
 
-// §14.2: past maxRanges, a request gets the whole response, not one part per
-// range, which would make the answer many times larger than the request.
+// §14.2: past maxRanges, a request gets the whole response, not one part per range, which would make the answer many times larger than the
+// request.
 func TestTooManyRanges(t *testing.T) {
 	t.Setenv("GODEBUG", strings.TrimPrefix(os.Getenv("GODEBUG")+",httpservecontentmaxranges=200", ",")) // see TestRangeSeveralParts
 	body := strings.Repeat("0123456789", 4)
@@ -165,11 +186,15 @@ func TestTooManyRanges(t *testing.T) {
 
 	rec := doRequest(c, http.MethodGet, testURL, http.Header{"Range": {ranges(maxRanges)}})
 	if rec.Code != http.StatusPartialContent || strings.Count(rec.Body.String(), "Content-Range: ") != maxRanges {
-		t.Errorf("%d ranges: got %d with %d parts, want a 206 with one part each", maxRanges, rec.Code, strings.Count(rec.Body.String(), "Content-Range: "))
+		t.Errorf(
+			"%d ranges: got %d with %d parts, want a 206 with one part each",
+			maxRanges, rec.Code, strings.Count(rec.Body.String(), "Content-Range: "),
+		)
 	}
 	for _, r := range []string{ranges(maxRanges + 1), ranges(maxRanges) + ",,"} {
 		rec = doRequest(c, http.MethodGet, testURL, http.Header{"Range": {r}})
-		if rec.Code != http.StatusOK || rec.Body.String() != body || rec.Header().Get("Content-Range") != "" || !isHit(lastCacheStatus(rec)) {
+		if rec.Code != http.StatusOK || rec.Body.String() != body || rec.Header().Get("Content-Range") != "" ||
+			!isHit(lastCacheStatus(rec)) {
 			t.Errorf("Range: %s: got %d %q %v, want the whole stored response", r, rec.Code, rec.Body.String(), rec.Header())
 		}
 	}
@@ -178,8 +203,7 @@ func TestTooManyRanges(t *testing.T) {
 	}
 }
 
-// §3.3: the cache does not store partial responses. Without a stored one, the
-// request is for the backend, whose 206 is not stored.
+// §3.3: the cache does not store partial responses. Without a stored one, the request is for the backend, whose 206 is not stored.
 func TestRangeWithoutStoredResponse(t *testing.T) {
 	b := rangeBackend()
 	b.status = http.StatusPartialContent

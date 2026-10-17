@@ -56,7 +56,11 @@ func TestInvalidation(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			b := &backend{status: tt.status, header: http.Header{"Cache-Status": {"origin; fwd=miss"}, "Location": {"/items/2"}}, body: "done"}
+			b := &backend{
+				status: tt.status,
+				header: http.Header{"Cache-Status": {"origin; fwd=miss"}, "Location": {"/items/2"}},
+				body:   "done",
+			}
 			c, st := newTestCache(t, b, nil)
 			storeFresh(t, st, invalidatedURL)
 			storeFresh(t, st, "http://example.com/items/1")
@@ -76,7 +80,9 @@ func TestInvalidation(t *testing.T) {
 			_, kept := st.lookup(cacheKey(invalidatedURL), "")
 			_, variantKept := st.lookup(cacheKey(invalidatedURL), "variant")
 			if kept == tt.wantInvalidated || variantKept == tt.wantInvalidated {
-				t.Errorf("§4.4 stored responses of the target URI kept = %v, %v; want invalidated = %v", kept, variantKept, tt.wantInvalidated)
+				t.Errorf(
+					"§4.4 stored responses of the target URI kept = %v, %v; want invalidated = %v", kept, variantKept, tt.wantInvalidated,
+				)
 			}
 			for _, other := range []string{"http://example.com/items/1", "http://example.com/items/2"} {
 				if _, ok := st.lookup(cacheKey(other), ""); !ok {
@@ -148,7 +154,8 @@ func TestInvalidationWithImplicitStatus(t *testing.T) {
 			c, st := newTestCache(t, h, nil)
 			storeFresh(t, st, "http://example.com/a")
 			rec := doRequest(c, http.MethodPost, "http://example.com/a", nil)
-			if rec.Code != 200 || st.invalidations != 1 || lastCacheStatus(rec) != "traedis; fwd=method; fwd-status=200; detail=invalidated" {
+			if rec.Code != 200 || st.invalidations != 1 ||
+				lastCacheStatus(rec) != "traedis; fwd=method; fwd-status=200; detail=invalidated" {
 				t.Errorf("an implicit 200 invalidates: got %d %q (invalidations %d)", rec.Code, lastCacheStatus(rec), st.invalidations)
 			}
 		})
@@ -209,8 +216,7 @@ func TestInvalidationPreservesHijacker(t *testing.T) {
 	}
 }
 
-// A response to an unsafe request reaches the client as it is written, not
-// when the handler returns.
+// A response to an unsafe request reaches the client as it is written, not when the handler returns.
 func TestUnsafeResponseStreams(t *testing.T) {
 	release := make(chan struct{})
 	// The handler never flushes, as compiled code that cannot see Flush.
