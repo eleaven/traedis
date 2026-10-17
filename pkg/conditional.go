@@ -169,8 +169,13 @@ func headMatches(e *entry, h http.Header) bool {
 }
 
 // kept lists the fields of a stored response that a 304 does not update
-// (§3.2): its body and its place in the store depend on them.
-var kept = []string{"Content-Encoding", "Content-Range", "Vary"}
+// (§3.2): its body and its place in the store depend on them. Its
+// representation metadata is among them, which a 304 has no reason to carry
+// (RFC 9110 §15.4.5): the one a backend sends with it may describe another
+// representation than the stored body, chosen by a request header field that
+// Vary does not name. With Accept: text/html, a client would otherwise have
+// a JSON body served as HTML to everyone.
+var kept = []string{"Content-Type", "Content-Encoding", "Content-Language", "Content-Range", "Vary"}
 
 // refreshed returns the stored response e updated by a 304, or by the response
 // to a HEAD, with header h (§3.2, §4.3.4, §4.3.5): the same body, the fields of

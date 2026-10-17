@@ -242,7 +242,8 @@ its `ETag` and `Last-Modified` are sent in place of the conditions of the client
 the same.
 
 - A `304` that names the validator of the stored response updates its header fields and makes it fresh again: it is served, as a `304` in
-  turn to a client that already has it.
+  turn to a client that already has it. Its `Content-Type`, `Content-Encoding`, `Content-Language`, `Content-Range` and `Vary` are
+  ignored: they describe the stored body, which a `304` does not replace.
 - A `304` without validator: the stored response is served but stays stale. With another validator: the backend is asked again for a whole
   response.
 - Any other response is sent to the client as it is and replaces the stored one.

@@ -213,6 +213,7 @@ func TestRefreshed(t *testing.T) {
 		"Cache-Control": {"max-age=120"}, "Etag": {`"v1"`}, "X-New": {"added"},
 		// Not updated: the stored body and its field depend on them.
 		"Content-Encoding": {"br"}, "Vary": {"Accept-Language"}, "Content-Range": {"bytes 0-1/4"},
+		"Content-Language": {"fr"},
 		// Never stored.
 		"Content-Length": {"0"}, "Connection": {"X-Hop"}, "X-Hop": {"1"},
 		// §3.1: stored like any other field, unless Cache-Control excludes it.
@@ -251,6 +252,13 @@ func TestRefreshed(t *testing.T) {
 	got = refreshed(excluding, http.Header{"Set-Cookie": {"sid=1"}, "X-New": {"added"}}, t0, t0)
 	if len(got.header.Values("Set-Cookie")) != 0 || got.header.Get("X-New") != "added" {
 		t.Errorf("§3.1 excluded by the stored response: %v", got.header)
+	}
+
+	// RFC 9110 §15.4.5: the representation metadata of a 304 may describe
+	// another representation than the stored body, which keeps its own.
+	got = refreshed(e, http.Header{"Content-Type": {"text/html"}, "X-New": {"added"}}, t0, t0)
+	if got.header.Get("Content-Type") != "text/plain" || got.header.Get("X-New") != "added" {
+		t.Errorf("Content-Type = %q, X-New = %q", got.header.Get("Content-Type"), got.header.Get("X-New"))
 	}
 
 	// The 304 has its own Date and Age.
@@ -766,6 +774,33 @@ func TestValidationWithSetCookie(t *testing.T) {
 				t.Errorf("a hit must not replay Set-Cookie: %q %q", next.Header().Values("Set-Cookie"), lastCacheStatus(next))
 			}
 		})
+	}
+}
+
+// RFC 9110 §15.4.5: a backend that chooses the format of its response by a
+// header field that Vary does not name may send the Content-Type of another
+// representation with its 304. The stored body keeps its own: otherwise, a
+// client would have it served to everyone as HTML.
+func TestValidationKeepsContentType(t *testing.T) {
+	o := newOrigin()
+	o.cacheControl = "max-age=60"
+	o.extra = http.Header{"Content-Type": {"text/html"}}
+	c, st := newTestCache(t, o, nil)
+	storeValidated(t, st, "max-age=60", 2*time.Minute)
+
+	rec := doRequest(c, http.MethodGet, staleURL, http.Header{"Accept": {"text/html"}})
+	if rec.Body.String() != "old" || !strings.HasPrefix(lastCacheStatus(rec), validated) {
+		t.Fatalf("got %q %q", rec.Body.String(), lastCacheStatus(rec))
+	}
+	if got := rec.Header().Get("Content-Type"); got != "text/plain" {
+		t.Errorf("Content-Type = %q, want the stored one", got)
+	}
+	e := storedAt(t, st, staleURL, "")
+	if e == nil || time.Since(e.responseTime) > time.Minute || e.header.Get("Content-Type") != "text/plain" {
+		t.Fatalf("the entry must be refreshed with its own Content-Type: %v", e)
+	}
+	if next := doRequest(c, http.MethodGet, staleURL, nil); !isHit(lastCacheStatus(next)) || next.Header().Get("Content-Type") != "text/plain" {
+		t.Errorf("hit: %q, Content-Type = %q", lastCacheStatus(next), next.Header().Get("Content-Type"))
 	}
 }
 

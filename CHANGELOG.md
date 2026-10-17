@@ -52,6 +52,12 @@ deprecated `Pragma` header field is read any more: see the breaking changes befo
   was read: a request whose first `Cookie` line was empty and the second one its session looked anonymous to the cache, not to a backend
   that reads all of them, and the page that the backend made for its session was stored for `defaultTtl` and served to everyone. A value on
   any line of these fields now counts.
+- **A client could have a stored response served to everyone with another `Content-Type`.** A `304` updates the header fields of the
+  stored response it validates, and it updated its `Content-Type` and `Content-Language` too, which RFC 9110 does not expect it to have
+  (§15.4.5). A backend that chooses the format of its response by a header field that its `Vary` does not name (`Accept`) and sends a
+  `Content-Type` with its `304`, when the `ETag` does not depend on the format, would have a stored JSON body served as `text/html`, with
+  what it holds of its users run as a script. The body now keeps its own, as it already did its `Content-Encoding`, also when a `HEAD`
+  refreshes it.
 - **A `GET` with content could poison the cache.** Its content is not part of the cache key, but some backends read parameters in it: what
   they answered was stored and served to the other clients of the URL. A `GET` or `HEAD` with content (`Content-Length` or
   `Transfer-Encoding`) is now forwarded untouched, with `Cache-Status: traedis; fwd=bypass`: it is not answered from the cache, and its
