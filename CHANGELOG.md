@@ -39,6 +39,11 @@ deprecated `Pragma` header field is read any more: see the breaking changes befo
   that its `Vary` does not name, a client could poison the cache whenever it wanted, without waiting for the stored response to expire. The
   `Cache-Control` of requests is now ignored, unless the new `ignoreClientCacheControl` option is `false`. Clients can no longer read stale
   responses with `max-stale` either, nor tell whether a URL is stored without storing it with `only-if-cached`.
+- **Behind `basicAuth` or `forwardAuth`, the page of a user could be served to the others.** The cache knows a request is authenticated by
+  its `Authorization`: `defaultTtl` is not applied to its response, which is only stored when the backend allows sharing it. `basicAuth`
+  with `removeHeader` replaces it with the header field of `headerField`, and `forwardAuth` adds those of `authResponseHeaders`: such a
+  request looked anonymous, and its response without `Cache-Control` was stored for `defaultTtl`. The new `authorizationHeaders` option
+  lists these header fields (`[X-WebAuth-User]`), or one with an API key: their requests are treated as those with `Authorization`.
 - **A `GET` with content could poison the cache.** Its content is not part of the cache key, but some backends read parameters in it: what
   they answered was stored and served to the other clients of the URL. A `GET` or `HEAD` with content (`Content-Length` or
   `Transfer-Encoding`) is now forwarded untouched, with `Cache-Status: traedis; fwd=bypass`: it is not answered from the cache, and its

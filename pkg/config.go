@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ type Config struct {
 	MaxRevalidations            int         `json:"maxRevalidations,omitempty"`
 	RevalidationTimeout         string      `json:"revalidationTimeout,omitempty"`
 	SortQuery                   bool        `json:"sortQuery,omitempty"`
+	AuthorizationHeaders        []string    `json:"authorizationHeaders,omitempty"`
 	IgnoreClientCacheControl    bool        `json:"ignoreClientCacheControl,omitempty"`
 	ExposeKey                   bool        `json:"exposeKey,omitempty"`
 }
@@ -80,6 +82,7 @@ func CreateConfig() *Config {
 		MaxRevalidations:            10,
 		RevalidationTimeout:         "30s",
 		SortQuery:                   false,
+		AuthorizationHeaders:        []string{},
 		IgnoreClientCacheControl:    true,
 		ExposeKey:                   false,
 	}
@@ -107,6 +110,9 @@ type settings struct {
 	// sortQuery makes the order of the query parameters irrelevant to the
 	// cache key (see cacheURI).
 	sortQuery bool
+	// authorizationHeaders lists the request header fields that tell who the
+	// client is, as Authorization does (see storeTTL): canonical names.
+	authorizationHeaders []string
 	// ignoreClientCacheControl makes the cache act as if requests had no
 	// Cache-Control (see ServeHTTP).
 	ignoreClientCacheControl bool
@@ -232,10 +238,30 @@ func parseConfig(cfg *Config) (settings, error) {
 	}
 
 	s.sortQuery = cfg.SortQuery
+	if s.authorizationHeaders, err = parseHeaderNames("authorizationHeaders", cfg.AuthorizationHeaders); err != nil {
+		return s, err
+	}
 	s.ignoreClientCacheControl = cfg.IgnoreClientCacheControl
 	s.exposeKey = cfg.ExposeKey
 
 	return s, nil
+}
+
+// parseHeaderNames parses a list of header field names: canonical, without
+// duplicates.
+func parseHeaderNames(option string, values []string) ([]string, error) {
+	var names []string
+	for _, value := range values {
+		name := strings.TrimSpace(value)
+		if !isToken(name) {
+			return nil, fmt.Errorf("%s: invalid header field name %q", option, value)
+		}
+		name = http.CanonicalHeaderKey(name)
+		if !slices.Contains(names, name) {
+			names = append(names, name)
+		}
+	}
+	return names, nil
 }
 
 // parseStatusCodes parses statusCodes: codes (404) and inclusive ranges

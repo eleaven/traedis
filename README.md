@@ -89,6 +89,7 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `maxRevalidations`             | `10`                   | [Background refreshes](#stale-responses) running at once, for each middleware in each Traefik instance.                                        |
 | `revalidationTimeout`          | `30s`                  | Maximum time of a background refresh.                                                                                                          |
 | `sortQuery`                    | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
+| `authorizationHeaders`         | `[]`                   | Request header fields that tell who the client is, as `Authorization` does (`X-WebAuth-User`): see [Security](#security).                      |
 | `ignoreClientCacheControl`     | `true`                 | Ignore the `Cache-Control` of requests, whose directives are advisory: see [Sent by the client](#sent-by-the-client).                          |
 | `exposeKey`                    | `false`                | Add the [Redis key](#cacheable-responses) to the `Cache-Status` header (`key="…"`).                                                            |
 
@@ -137,7 +138,8 @@ The request of the client says whether a stored response may answer it.
 - `If-None-Match`, `If-Modified-Since`: answered with a `304` when the stored response is the one the client
   [already has](#conditional-requests).
 - `Range`, `If-Range`: answered with the bytes asked for of the stored response ([range requests](#range-requests)).
-- `Authorization`: the response is not stored, unless the backend allows sharing it with `public`, `s-maxage` or `must-revalidate`.
+- `Authorization`, and the header fields of `authorizationHeaders`: the response is not stored, unless the backend allows sharing it with
+  `public`, `s-maxage` or `must-revalidate`.
 - `Cookie`: not part of the cache key, see [Security](#security).
 - `Accept-Encoding`, and the header fields that `Vary` names: choose the [variant](#variants).
 - `Upgrade`, `Accept: text/event-stream`: forwarded untouched (WebSockets, server-sent events).
@@ -321,12 +323,17 @@ A shared cache gives the response made for one client to all the others. The def
 
 - **A cookie does not make a response private.** Cookies are not part of the cache key: a response with `max-age`, `s-maxage` or `Expires`
   is stored and shared even when its request had a `Cookie` (only `defaultTtl` is never applied to an exchange with `Authorization`,
-  `Cookie` or `Set-Cookie`). Whatever depends on the session must say `Cache-Control: private` or `no-store`. In the same way, `public`,
-  `s-maxage` and `must-revalidate` allow sharing the response to a request with `Authorization`.
+  `authorizationHeaders`, `Cookie` or `Set-Cookie`). Whatever depends on the session must say `Cache-Control: private` or `no-store`. In the
+  same way, `public`, `s-maxage` and `must-revalidate` allow sharing the response to a request with `Authorization` or
+  `authorizationHeaders`.
 - **`private="Set-Cookie"` only keeps the cookie out.** The other header fields and the body are served to everyone: don't use it when they
   depend on the cookie (CSRF token, user name…).
 - **Middlewares listed after the cache don't run on a hit.** `basicAuth`, `forwardAuth`, `ipAllowList` and `rateLimit` go before it. The
   cache does not know who they let in: what it stores is shared by all of them.
+- **The cache only knows `Authorization`.** A middleware that replaces it with a header field of its own (`basicAuth` with `removeHeader`
+  and `headerField`, `forwardAuth` with `authResponseHeaders`), or an API key in a header field, makes the request look anonymous: the
+  response it gets without `Cache-Control` is stored for `defaultTtl`, and the page of one user served to the others. List these header
+  fields in `authorizationHeaders` (`[X-WebAuth-User]`): their requests are then treated as those with `Authorization`.
 - **The key is the URL the cache sees, not the router.** The routers that use the same cache middleware share its stored responses: when
   two of them answer the same URL with different backends, one kept for some clients (by `ClientIP`, a header, an entry point…) and the
   other not, each one serves what the other stored. A middleware that rewrites the URL before the cache (`stripPrefix`, `replacePath`…)

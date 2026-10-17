@@ -175,6 +175,12 @@ func TestStoreTTL(t *testing.T) {
 		{name: "§3.5 Authorization with s-maxage", reqHdr: http.Header{"Authorization": {"Bearer x"}}, status: 200, respHdr: http.Header{"Cache-Control": {"s-maxage=60"}}, want: time.Minute + time.Hour},
 		{name: "§3.5 Authorization with must-revalidate", reqHdr: http.Header{"Authorization": {"Bearer x"}}, status: 200, respHdr: http.Header{"Cache-Control": {"must-revalidate, max-age=60"}}, want: time.Minute + time.Hour},
 		{name: "no defaultTtl for Authorization even if public", reqHdr: http.Header{"Authorization": {"Bearer x"}}, status: 200, respHdr: http.Header{"Cache-Control": {"public"}}},
+		{name: "authorizationHeaders: not stored without permission", reqHdr: http.Header{"X-Webauth-User": {"alice"}}, status: 200, respHdr: http.Header{"Cache-Control": {"max-age=60"}}, mutate: withAuthorizationHeader},
+		{name: "authorizationHeaders: no defaultTtl", reqHdr: http.Header{"X-Webauth-User": {"alice"}}, status: 200, respHdr: http.Header{}, mutate: withAuthorizationHeader},
+		{name: "authorizationHeaders: stored with public", reqHdr: http.Header{"X-Webauth-User": {"alice"}}, status: 200, respHdr: http.Header{"Cache-Control": {"public, max-age=60"}}, mutate: withAuthorizationHeader, want: time.Minute + time.Hour},
+		{name: "authorizationHeaders: an empty value tells nobody", reqHdr: http.Header{"X-Webauth-User": {""}}, status: 200, respHdr: http.Header{"Cache-Control": {"max-age=60"}}, mutate: withAuthorizationHeader, want: time.Minute + time.Hour},
+		{name: "authorizationHeaders: request without them", reqHdr: http.Header{"X-Other": {"alice"}}, status: 200, respHdr: http.Header{}, mutate: withAuthorizationHeader, want: 5*time.Minute + time.Hour},
+		{name: "no authorizationHeaders by default", reqHdr: http.Header{"X-Webauth-User": {"alice"}}, status: 200, respHdr: http.Header{}, want: 5*time.Minute + time.Hour},
 		{name: "no defaultTtl for requests with Cookie", reqHdr: http.Header{"Cookie": {"sid=1"}}, status: 200, respHdr: http.Header{}},
 		{name: "explicit freshness for requests with Cookie", reqHdr: http.Header{"Cookie": {"sid=1"}}, status: 200, respHdr: http.Header{"Cache-Control": {"max-age=60"}}, want: time.Minute + time.Hour},
 		{name: "Set-Cookie", status: 200, respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Set-Cookie": {"sid=1"}}},
@@ -223,6 +229,12 @@ func TestStoreTTL(t *testing.T) {
 			}
 		})
 	}
+}
+
+// withAuthorizationHeader lists X-WebAuth-User in authorizationHeaders, as for a basicAuth
+// middleware with headerField and removeHeader before the cache.
+func withAuthorizationHeader(s *settings) {
+	s.authorizationHeaders = []string{"X-Webauth-User"}
 }
 
 func TestLookupAllowed(t *testing.T) {

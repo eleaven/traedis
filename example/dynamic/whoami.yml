@@ -82,6 +82,14 @@ http:
       middlewares:
         - whoami-client
       service: whoami
+    # Authorization header fields: here basicAuth (alice:alice-secret, bob:bob-secret) replaces Authorization with X-WebAuth-User, which
+    # the cache is told about: the page of alice is not served to bob. `curl -u alice:alice-secret …/whoami-authorization`
+    whoami-authorization:
+      rule: PathPrefix(`/whoami-authorization`)
+      middlewares:
+        - whoami-auth # before the cache: a hit is served without running what comes after it
+        - whoami-authorization
+      service: whoami
     whoami:
       rule: PathPrefix(`/whoami`)
       service: whoami
@@ -129,6 +137,19 @@ http:
           redis:
             dsn: "redis://cache:6379/2"
           ignoreClientCacheControl: false # on by default: request directives are advisory (RFC 9111 §5.2.1)
+    whoami-auth:
+      basicAuth:
+        users:
+          - "alice:$apr1$gJWplQWT$0ny9VbN3AkZhHHs5oHQBS1"
+          - "bob:$apr1$8gJoVHET$x6klEdUMV.bq8/w9aBTtI/"
+        headerField: X-WebAuth-User
+        removeHeader: true # the cache no longer sees Authorization: only authorizationHeaders tell it who the client is
+    whoami-authorization:
+      plugin:
+        traedis:
+          redis:
+            dsn: "redis://cache:6379/2"
+          authorizationHeaders: [ X-WebAuth-User ]
     whoami-vary:
       plugin:
         traedis:

@@ -31,8 +31,8 @@ func TestCreateConfigDefaults(t *testing.T) {
 	if s.maxRevalidations != 10 || s.revalidationTimeout != 30*time.Second {
 		t.Errorf("maxRevalidations = %d, revalidationTimeout = %v", s.maxRevalidations, s.revalidationTimeout)
 	}
-	if !s.ignoreClientCacheControl {
-		t.Errorf("ignoreClientCacheControl = %v", s.ignoreClientCacheControl)
+	if len(s.authorizationHeaders) != 0 || !s.ignoreClientCacheControl {
+		t.Errorf("authorizationHeaders = %v, ignoreClientCacheControl = %v", s.authorizationHeaders, s.ignoreClientCacheControl)
 	}
 	if s.maxBodyBytes != 5242880 || s.maxBufferedBytes != 64<<20 || s.maxVariants != 16 || s.sortQuery || s.exposeKey {
 		t.Errorf("settings = %+v", s)
@@ -110,6 +110,17 @@ func TestParseConfig(t *testing.T) {
 				want := []int{200, 201, 202, 203, 204, 205, 207, 208, 209, 210, 300, 301, 302, 303, 404}
 				if !reflect.DeepEqual(s.statusCodes, want) {
 					t.Errorf("statusCodes = %v, want %v", s.statusCodes, want)
+				}
+			},
+		},
+		{name: "invalid authorizationHeaders", mutate: func(c *Config) { c.AuthorizationHeaders = []string{"X-User", "X User"} }, wantErr: `authorizationHeaders: invalid header field name "X User"`},
+		{name: "empty authorizationHeaders name", mutate: func(c *Config) { c.AuthorizationHeaders = []string{""} }, wantErr: "authorizationHeaders"},
+		{
+			name:   "authorizationHeaders are canonical, without duplicates",
+			mutate: func(c *Config) { c.AuthorizationHeaders = []string{" x-webauth-user", "X-Api-Key", "X-WEBAUTH-USER"} },
+			check: func(t *testing.T, s settings) {
+				if !reflect.DeepEqual(s.authorizationHeaders, []string{"X-Webauth-User", "X-Api-Key"}) {
+					t.Errorf("authorizationHeaders = %q", s.authorizationHeaders)
 				}
 			},
 		},
@@ -260,6 +271,7 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.MaxRevalidations = 10
 	cfg.RevalidationTimeout = "30s"
 	cfg.SortQuery = false
+	cfg.AuthorizationHeaders = []string{}
 	cfg.IgnoreClientCacheControl = true
 	cfg.ExposeKey = false
 

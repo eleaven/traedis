@@ -329,7 +329,11 @@ func storeTTL(req *http.Request, reqCC cacheControl, e *entry, cc cacheControl, 
 	if cc.mustUnderstand && !understood(status) {
 		return 0, false
 	}
-	hasAuth := req.Header.Get("Authorization") != ""
+	// §3.5: a response to an authenticated request is not shared unless it
+	// says it may be. authorizationHeaders tell who the client is too, when a
+	// middleware before the cache replaced Authorization with them (basicAuth,
+	// forwardAuth) or when the backend reads an API key there.
+	hasAuth := req.Header.Get("Authorization") != "" || hasAuthorization(req.Header, cfg.authorizationHeaders)
 	if hasAuth && !cc.public && cc.sMaxAge < 0 && !cc.mustRevalidate {
 		return 0, false
 	}
@@ -365,6 +369,17 @@ func storeTTL(req *http.Request, reqCC cacheControl, e *entry, cc cacheControl, 
 		return 0, false
 	}
 	return remaining + cfg.staleTTL, true
+}
+
+// hasAuthorization reports whether the request header h has one of the
+// authorizationHeaders, with a value.
+func hasAuthorization(h http.Header, authorizationHeaders []string) bool {
+	for _, name := range authorizationHeaders {
+		if h.Get(name) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // lookupAllowed reports whether the request lets the cache answer from storage
@@ -458,8 +473,8 @@ func staleIfErrorStatus(status int) bool {
 // is failing or throttling (5xx, 429), or rejects that request (its
 // Authorization, its cookies, its header fields…), but for a 404 or a 410,
 // which say the resource is gone. Neither does a response only refused
-// because of the Authorization or Cookie of that request: a request without
-// them would get it stored. cc is the Cache-Control of e.
+// because of the Authorization, authorizationHeaders or Cookie of that
+// request: a request without them would get it stored. cc is the Cache-Control of e.
 func supersedes(e *entry, cc cacheControl, cfg settings) bool {
 	if e.status >= 400 && e.status != http.StatusNotFound && e.status != http.StatusGone {
 		return false

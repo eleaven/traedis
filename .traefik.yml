@@ -29,5 +29,6 @@ testData:
   maxRevalidations: 10
   revalidationTimeout: 30s
   sortQuery: false
+  authorizationHeaders: [ ]
   ignoreClientCacheControl: true
   exposeKey: false

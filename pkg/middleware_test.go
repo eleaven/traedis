@@ -326,6 +326,26 @@ func TestClientCacheControlIgnored(t *testing.T) {
 	})
 }
 
+// authorizationHeaders keep the response to a client from the others, as
+// Authorization does (§3.5): the backend has to allow it.
+func TestAuthorizationHeaders(t *testing.T) {
+	b := &backend{header: http.Header{"Content-Type": {"text/plain"}}, body: "hello alice"}
+	c, st := newTestCache(t, b, func(cfg *Config) { cfg.AuthorizationHeaders = []string{"x-webauth-user"} })
+	alice := http.Header{"X-Webauth-User": {"alice"}}
+	doRequest(c, http.MethodGet, testURL, alice)
+	b.body = "hello bob"
+	rec := doRequest(c, http.MethodGet, testURL, http.Header{"X-Webauth-User": {"bob"}})
+	if st.sets != 0 || rec.Body.String() != "hello bob" {
+		t.Errorf("sets = %d, bob got %q: defaultTtl must not apply", st.sets, rec.Body.String())
+	}
+
+	b.header.Set("Cache-Control", "public, max-age=60")
+	doRequest(c, http.MethodGet, testURL, alice)
+	if st.sets != 1 {
+		t.Errorf("sets = %d: public allows sharing the response", st.sets)
+	}
+}
+
 func TestMaxStale(t *testing.T) {
 	tests := []struct {
 		name         string

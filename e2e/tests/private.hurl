@@ -83,3 +83,22 @@ HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=200"
 header "Set-Cookie" == "sid=e2e-secret"
+
+# authorizationHeaders: basicAuth replaced Authorization with X-WebAuth-User, which the cache is told about. Without
+# explicit freshness, defaultTtl is not applied: the page of alice is not stored, and bob gets his own
+GET {{base_url}}/whoami-authorization?run={{run}}
+[BasicAuth]
+alice: alice-secret
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=200"
+body contains "X-Webauth-User: alice"
+body not contains "Authorization"
+
+GET {{base_url}}/whoami-authorization?run={{run}}
+[BasicAuth]
+bob: bob-secret
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss; fwd-status=200"
+body contains "X-Webauth-User: bob"
