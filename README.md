@@ -180,7 +180,7 @@ Traedis adds these to the responses it sends to the client, and to the requests 
 
 ### Cacheable responses
 
-Responses are stored by middleware and by URL (scheme, host, path and query), and only when all of the following hold:
+Responses are stored by middleware and by URL (scheme, host with its case, path and query), and only when all of the following hold:
 
 - the request is a `GET` (a `HEAD` is answered from the stored `GET`);
 - its status is listed in `statusCodes`;
@@ -304,8 +304,9 @@ When the backend answers a request with an unsafe method (any method that is not
 - They are removed before the client gets the answer: its next `GET` is not served what was stored before. The answer itself is never held
   back.
 - An error (`4xx`, `5xx`) changes nothing: the stored responses are kept, also for `stale-if-error`.
-- Only the URL of the request is invalidated, query included, and only for the middleware the request goes through: `POST /cart/add`
-  does not invalidate `/cart`, and the `Location` and `Content-Location` of the response are not followed.
+- Only the URL of the request is invalidated, query and case of the host included, and only for the middleware the request goes through:
+  `POST /cart/add` does not invalidate `/cart`, nor does a `PUT` to `API.example.com` what was stored for `api.example.com`, which
+  browsers always send. The `Location` and `Content-Location` of the response are not followed.
 - There is no guarantee: if Redis cannot be reached at that moment, the stored responses stay until they expire, and a `GET` that was
   already on its way to the backend can store its response after the invalidation.
 - Any client can trigger it, even without credentials when the backend answers it with a `2xx` or a `3xx`: see [Security](#security).
@@ -351,9 +352,9 @@ A shared cache gives the response made for one client to all the others. The def
   `X-Forwarded-*` header fields of the clients it does not trust, but not these. With `ignoreClientCacheControl: false`, it also chooses
   when: `Cache-Control: no-cache` replaces the stored response with what the backend answers to its request. The cache only tells one such
   response from the others: a redirection to its own URL, which it never stores. A backend sends one when it takes the scheme of a header
-  field that Traefik leaves to the clients (`X-Forwarded-Scheme` or `X-Forwarded-Ssl` for Rails' `force_ssl`), or compares the case of the
-  host with its own: stored for `defaultTtl`, it would send every client in a loop. With a `statusCodes` that lists errors, such a header
-  field can also have one stored for everyone (`X-HTTP-Method-Override` makes some backends answer `405`).
+  field that Traefik leaves to the clients (`X-Forwarded-Scheme` or `X-Forwarded-Ssl` for Rails' `force_ssl`): stored for `defaultTtl`,
+  it would send every client in a loop. With a `statusCodes` that lists errors, such a header field can also have one stored for everyone
+  (`X-HTTP-Method-Override` makes some backends answer `405`). The host is not one of them: the key keeps its case, as the backend gets it.
 - **Behind a proxy that terminates TLS, Traefik has to trust it.** The scheme of the key is the one of `X-Forwarded-Proto`, which Traefik
   sets to the one of the connection, unless a proxy it trusts sent it: list that proxy in the `forwardedHeaders.trustedIPs` of the entry
   point. Otherwise, `https` requests reach Traefik over `http` like the others and share their stored responses: a redirection of the

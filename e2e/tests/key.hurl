@@ -1,4 +1,4 @@
-# Cache key: scheme + lowercased host + path + query.
+# Cache key: scheme + host + path + query.
 
 GET {{base_url}}/placeholder-cache/600x600?b=2&a=1&run={{run}}
 [Options]
@@ -43,7 +43,7 @@ HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; fwd=uri-miss"
 
-# Host is case-insensitive
+# The case of the host is kept: the backend gets it as it is, and may answer another page to another case
 GET {{base_url}}/whoami-cache?host={{run}}
 Host: Traedis.Example
 HTTP 200
@@ -52,6 +52,12 @@ header "Cache-Status" contains "traedis; fwd=uri-miss"
 
 GET {{base_url}}/whoami-cache?host={{run}}
 Host: traedis.example
+HTTP 200
+[Asserts]
+header "Cache-Status" contains "traedis; fwd=uri-miss"
+
+GET {{base_url}}/whoami-cache?host={{run}}
+Host: Traedis.Example
 HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; hit"

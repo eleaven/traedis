@@ -9,9 +9,13 @@ import (
 
 const keyPrefix = "traedis:"
 
-// cacheURI returns the normalized URI identifying a resource: scheme, lowercased host (port kept), escaped path and raw query. With
+// cacheURI returns the normalized URI identifying a resource: scheme, host (case and port kept), escaped path and raw query. With
 // sortQuery, the query is sorted by parameter name: URIs that only differ by the order of their parameters, which are not the same for RFC
 // 9111 (§4), then share their stored responses. The method is not part of it. This format is stable: changing it invalidates the cache.
+//
+// The host keeps its case, although it does not matter for RFC 3986 (§6.2.2.1): the backend gets it as the client sent it, in Host and in
+// the X-Forwarded-Host that Traefik sets before the cache. What it answers to EXAMPLE.com (the page of another site, when it looks its
+// sites up with their case) must not be served for example.com, which browsers always send.
 func cacheURI(r *http.Request, sortQuery bool) string {
 	// Scheme: the one of X-Forwarded-Proto, which Traefik sets to the one of the connection, unless a proxy it trusts (forwardedHeaders)
 	// sent it: behind a proxy that terminates TLS, https requests reach Traefik over http too, and must not share their stored responses
@@ -36,7 +40,7 @@ func cacheURI(r *http.Request, sortQuery bool) string {
 	return normalizedURI(scheme, host, r.URL.EscapedPath(), r.URL.RawQuery, sortQuery)
 }
 
-// normalizedURI writes a URI from its parts as cacheURI does: lowercased host, "/" for an empty path, and the query sorted with sortQuery.
+// normalizedURI writes a URI from its parts as cacheURI does: "/" for an empty path, and the query sorted with sortQuery.
 func normalizedURI(scheme, host, path, query string, sortQuery bool) string {
 	if path == "" {
 		path = "/"
@@ -44,7 +48,7 @@ func normalizedURI(scheme, host, path, query string, sortQuery bool) string {
 	if sortQuery {
 		query = sortedQuery(query)
 	}
-	uri := scheme + "://" + strings.ToLower(host) + path
+	uri := scheme + "://" + host + path
 	if query != "" {
 		uri += "?" + query
 	}
@@ -52,9 +56,9 @@ func normalizedURI(scheme, host, path, query string, sortQuery bool) string {
 }
 
 // redirectsToItself reports whether a response with header h, to r, has a Location that leads back to its own URI, as cacheURI writes it,
-// whatever the port its scheme has by default. Served from the cache, such a redirection sends every client in a loop: the backend saw
-// another request than the key does, which a header field that it reads tells it (X-Forwarded-Scheme, X-Forwarded-Ssl…), or the case of
-// the host. A Location that cannot be parsed leads elsewhere.
+// whatever the port its scheme has by default and the case of its host, which browsers lowercase before they follow it. Served from the
+// cache, such a redirection sends every client in a loop: the backend saw another request than the key does, which a header field that it
+// reads tells it (X-Forwarded-Scheme, X-Forwarded-Ssl…). A Location that cannot be parsed leads elsewhere.
 func redirectsToItself(r *http.Request, h http.Header, sortQuery bool) bool {
 	location := h.Get("Location")
 	if location == "" {
@@ -72,10 +76,10 @@ func redirectsToItself(r *http.Request, h http.Header, sortQuery bool) bool {
 	return comparableURI(self, sortQuery) == comparableURI(target, sortQuery)
 }
 
-// comparableURI writes u as normalizedURI does, without the port its scheme has by default: https://example.com:443/ is
-// https://example.com/.
+// comparableURI writes u as normalizedURI does, with a lowercased host and without the port its scheme has by default:
+// https://EXAMPLE.com:443/ is https://example.com/.
 func comparableURI(u *url.URL, sortQuery bool) string {
-	host := u.Host
+	host := strings.ToLower(u.Host)
 	if (u.Scheme == "http" && strings.HasSuffix(host, ":80")) || (u.Scheme == "https" && strings.HasSuffix(host, ":443")) {
 		host = host[:strings.LastIndexByte(host, ':')]
 	}

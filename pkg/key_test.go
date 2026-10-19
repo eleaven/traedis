@@ -17,7 +17,7 @@ func TestCacheURI(t *testing.T) {
 		sort   bool   // sortQuery
 		want   string
 	}{
-		{name: "host is lowercased", target: "/a", host: "Example.COM", want: "http://example.com/a"},
+		{name: "host case is kept", target: "/a", host: "Example.COM", want: "http://Example.COM/a"},
 		{name: "port is kept", target: "/a", host: "example.com:8080", want: "http://example.com:8080/a"},
 		{name: "https when TLS", target: "/a", host: "example.com", tls: true, want: "https://example.com/a"},
 		{name: "X-Forwarded-Proto: https over http", target: "/a", host: "example.com", proto: "https", want: "https://example.com/a"},

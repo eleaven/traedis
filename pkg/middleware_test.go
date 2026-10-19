@@ -132,8 +132,7 @@ func TestMissThenHit(t *testing.T) {
 		t.Errorf("stored ttl = %v, want %v", v.ttl, want)
 	}
 
-	// Same resource: the host is case-insensitive.
-	second := doRequest(c, http.MethodGet, "http://EXAMPLE.com/600x400?b=2&a=1", nil)
+	second := doRequest(c, http.MethodGet, testURL, nil)
 	if b.calls != 1 {
 		t.Errorf("backend calls = %d, want 1", b.calls)
 	}
@@ -1268,6 +1267,30 @@ func TestRedirectionToItselfIsNotStored(t *testing.T) {
 				t.Errorf("got %d %q, Cache-Status = %q", rec.Code, rec.Body.String(), lastCacheStatus(rec))
 			}
 		})
+	}
+}
+
+// The case of the host is part of the key: a backend that looks its sites up with their case answers EXAMPLE.com with another page, which
+// must not be served for example.com.
+func TestHostCaseIsPartOfTheKey(t *testing.T) {
+	c, _ := newTestCache(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "max-age=60")
+		if r.Host != "example.com" {
+			_, _ = io.WriteString(w, "default site")
+			return
+		}
+		_, _ = io.WriteString(w, "page")
+	}), nil)
+	upper := httptest.NewRequest(http.MethodGet, "http://EXAMPLE.com/a", nil)
+	c.ServeHTTP(httptest.NewRecorder(), upper)
+	settle(c)
+
+	// The miss, then the hit.
+	for i := 0; i < 2; i++ {
+		rec := doRequest(c, http.MethodGet, "http://example.com/a", nil)
+		if rec.Body.String() != "page" {
+			t.Fatalf("got %q, Cache-Status = %q", rec.Body.String(), lastCacheStatus(rec))
+		}
 	}
 }
 

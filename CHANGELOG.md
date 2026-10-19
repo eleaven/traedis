@@ -5,16 +5,21 @@ What each release changes for those who use the plugin, the latest first. The se
 
 ## v0.3.1
 
-A security fix: clients can no longer have a redirection that loops stored for everyone.
+Security fixes: clients can no longer have a redirection that loops, nor the page the backend makes for another case of the host, stored
+for everyone. The cache key now keeps the case of the host: see the breaking change before upgrading.
 
 ### Security
 
 - **A client could have every client redirected in a loop.** A `301` or a `308` is stored for `defaultTtl` even without `Cache-Control`,
   and the backend may answer one because of a header field that the cache key does not have: Rails' `force_ssl` takes the scheme of
-  `X-Forwarded-Scheme` or `X-Forwarded-Ssl`, which Traefik leaves to the clients, and some backends compare the case of the host with their
-  own, which the key lowercases. With `X-Forwarded-Scheme: http` on an `https` request, or `Host: EXAMPLE.com`, a client got the
-  redirection to the URL it had asked for stored, then served to all the others, who followed it in a loop, for as long as it wanted. A
-  redirection to its own URL, its default port and the case of its host aside, is now never stored, even with explicit freshness.
+  `X-Forwarded-Scheme` or `X-Forwarded-Ssl`, which Traefik leaves to the clients. With `X-Forwarded-Scheme: http` on an `https` request, a
+  client got the redirection to the URL it had asked for stored, then served to all the others, who followed it in a loop, for as long as
+  it wanted. A redirection to its own URL, its default port and the case of its host aside, is now never stored, even with explicit
+  freshness.
+- **A client could have the page of another case of the host served to everyone.** The cache key lowercased the host, but the backend gets
+  it as the client sent it, in `Host` and in the `X-Forwarded-Host` that Traefik sets. A backend that compares it with its own case, to look
+  up a site or redirect to its canonical host, answered `Host: EXAMPLE.com` with another page (the default site, a redirection to
+  `example.com`, in a loop), which was stored and served for `example.com`. The key now keeps the case of the host.
 
 ### Documentation
 
