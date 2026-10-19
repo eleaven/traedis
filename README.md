@@ -186,6 +186,8 @@ Responses are stored by middleware and by URL (scheme, host, path and query), an
 - its status is listed in `statusCodes`;
 - it is fresh, through `s-maxage`, `max-age`, `Expires` or `defaultTtl`;
 - no [header field](#http-headers) of the request or of the response forbids it;
+- it is not a redirection to its own URL (its default port and the case of its host aside), which would send every client back to it in a
+  loop (see [Security](#security));
 - it is complete (a response that the backend cuts short is not stored) and fits in `maxBodyBytes`, and in `maxBufferedBytes` along with
   the other bodies held in memory (see [Security](#security)).
 
@@ -347,7 +349,11 @@ A shared cache gives the response made for one client to all the others. The def
 - **What the response depends on must be in `Vary`.** When the backend reads a request header that its `Vary` does not name
   (`Forwarded`, `X-Original-URL`, `User-Agent`, `Accept-Language`…), one client chooses what the others get. Traefik replaces the
   `X-Forwarded-*` header fields of the clients it does not trust, but not these. With `ignoreClientCacheControl: false`, it also chooses
-  when: `Cache-Control: no-cache` replaces the stored response with what the backend answers to its request.
+  when: `Cache-Control: no-cache` replaces the stored response with what the backend answers to its request. The cache only tells one such
+  response from the others: a redirection to its own URL, which it never stores. A backend sends one when it takes the scheme of a header
+  field that Traefik leaves to the clients (`X-Forwarded-Scheme` or `X-Forwarded-Ssl` for Rails' `force_ssl`), or compares the case of the
+  host with its own: stored for `defaultTtl`, it would send every client in a loop. With a `statusCodes` that lists errors, such a header
+  field can also have one stored for everyone (`X-HTTP-Method-Override` makes some backends answer `405`).
 - **Behind a proxy that terminates TLS, Traefik has to trust it.** The scheme of the key is the one of `X-Forwarded-Proto`, which Traefik
   sets to the one of the connection, unless a proxy it trusts sent it: list that proxy in the `forwardedHeaders.trustedIPs` of the entry
   point. Otherwise, `https` requests reach Traefik over `http` like the others and share their stored responses: a redirection of the

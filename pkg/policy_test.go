@@ -419,6 +419,25 @@ func TestStoreTTL(t *testing.T) {
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Location": {"/b"}},
 			want:    time.Minute + time.Hour,
 		},
+		{name: "redirection to itself not stored", status: 301, respHdr: http.Header{"Location": {"http://example.com/"}}},
+		{
+			name:    "redirection to itself not stored, even with explicit freshness",
+			status:  302,
+			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Location": {"/"}},
+		},
+		{
+			name:    "redirection to another scheme stored",
+			status:  301,
+			respHdr: http.Header{"Location": {"https://example.com/"}},
+			want:    5*time.Minute + time.Hour,
+		},
+		{
+			name:    "Location of another status is not looked at",
+			status:  201,
+			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Location": {"/"}},
+			mutate:  func(s *settings) { s.statusCodes = []int{201} },
+			want:    time.Minute + time.Hour,
+		},
 		{
 			name:    "Content-Range never stored",
 			status:  200,

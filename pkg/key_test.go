@@ -2,6 +2,7 @@ package traedis
 
 import (
 	"crypto/tls"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 )
@@ -94,6 +95,60 @@ func TestCacheURI(t *testing.T) {
 			}
 			if got := cacheURI(r, tt.sort); got != tt.want {
 				t.Errorf("cacheURI() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRedirectsToItself(t *testing.T) {
+	tests := []struct {
+		name     string
+		target   string // of the request, on host example.com
+		proto    string // X-Forwarded-Proto
+		sort     bool   // sortQuery
+		location string
+		want     bool
+	}{
+		{name: "no Location", target: "/a", location: ""},
+		{name: "same URI", target: "/a", location: "http://example.com/a", want: true},
+		{name: "relative path", target: "/a", location: "/a", want: true},
+		{name: "relative reference", target: "/a/b", location: "b", want: true},
+		{name: "scheme-relative", target: "/a", location: "//example.com/a", want: true},
+		{name: "fragment ignored", target: "/a", location: "/a#top", want: true},
+		{name: "host case ignored", target: "/a", location: "http://EXAMPLE.com/a", want: true},
+		{name: "scheme case ignored", target: "/a", location: "HTTP://example.com/a", want: true},
+		{name: "default port of http", target: "/a", location: "http://example.com:80/a", want: true},
+		{name: "default port of https", target: "/a", proto: "https", location: "https://example.com:443/a", want: true},
+		{name: "same URI over https", target: "/a", proto: "https", location: "https://example.com/a", want: true},
+		{name: "same query", target: "/a?x=1", location: "/a?x=1", want: true},
+		{name: "empty path is /", target: "/", location: "http://example.com", want: true},
+		{name: "other scheme", target: "/a", location: "https://example.com/a"},
+		{name: "other host", target: "/a", location: "http://www.example.com/a"},
+		{name: "other port", target: "/a", location: "http://example.com:8080/a"},
+		{name: "https port over http", target: "/a", location: "http://example.com:443/a"},
+		{name: "other path", target: "/a", location: "/b"},
+		{name: "path case kept", target: "/a", location: "/A"},
+		{name: "trailing slash", target: "/a", location: "/a/"},
+		{name: "escaped path kept", target: "/a/b", location: "/a%2Fb"},
+		{name: "other query", target: "/a?x=1", location: "/a?x=2"},
+		{name: "query dropped", target: "/a?x=1", location: "/a"},
+		{name: "query order kept", target: "/a?x=1&y=2", location: "/a?y=2&x=1"},
+		{name: "sortQuery: query order ignored", target: "/a?x=1&y=2", sort: true, location: "/a?y=2&x=1", want: true},
+		{name: "unparsable Location", target: "/a", location: "http://[::1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := httptest.NewRequest("GET", tt.target, nil)
+			r.Host = "example.com"
+			if tt.proto != "" {
+				r.Header.Set("X-Forwarded-Proto", tt.proto)
+			}
+			h := http.Header{}
+			if tt.location != "" {
+				h.Set("Location", tt.location)
+			}
+			if got := redirectsToItself(r, h, tt.sort); got != tt.want {
+				t.Errorf("redirectsToItself(%q) = %v, want %v", tt.location, got, tt.want)
 			}
 		})
 	}

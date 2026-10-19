@@ -1228,6 +1228,49 @@ func TestRedirectionToHTTPSIsNotServedToHTTPS(t *testing.T) {
 	}
 }
 
+// A redirection to its own URI is not stored: a header field that the key does not have, or the case of the host, made the backend send
+// it, and every client would follow it in a loop.
+func TestRedirectionToItselfIsNotStored(t *testing.T) {
+	tests := []struct {
+		name   string
+		host   string // of the attacker
+		attack http.Header
+	}{
+		// Rack (Rails force_ssl) takes the scheme of X-Forwarded-Scheme, which Traefik leaves to the clients.
+		{name: "X-Forwarded-Scheme", host: "example.com", attack: http.Header{"X-Forwarded-Scheme": {"http"}}},
+		// A canonical host compared with its case.
+		{name: "host case", host: "EXAMPLE.com"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c, st := newTestCache(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Header.Get("X-Forwarded-Scheme") == "http" || r.Host != "example.com" {
+					http.Redirect(w, r, "https://example.com"+r.URL.RequestURI(), http.StatusMovedPermanently)
+					return
+				}
+				_, _ = io.WriteString(w, "page")
+			}), nil)
+			attack := http.Header{"X-Forwarded-Proto": {"https"}}
+			for name, values := range tt.attack {
+				attack[name] = values
+			}
+			req := httptest.NewRequest(http.MethodGet, "http://example.com/a", nil)
+			req.Host = tt.host
+			req.Header = attack
+			c.ServeHTTP(httptest.NewRecorder(), req)
+			settle(c)
+			if len(st.data) != 0 {
+				t.Fatalf("the redirection was stored: %v", st.data)
+			}
+
+			rec := doRequest(c, http.MethodGet, "http://example.com/a", http.Header{"X-Forwarded-Proto": {"https"}})
+			if rec.Code != 200 || rec.Body.String() != "page" {
+				t.Errorf("got %d %q, Cache-Status = %q", rec.Code, rec.Body.String(), lastCacheStatus(rec))
+			}
+		})
+	}
+}
+
 // A response to a GET reaches the client as it is written, not when the handler returns, whether the cache keeps a copy of it or not: under
 // Yaegi v0.16.1 the backend cannot flush the writer the cache wraps.
 func TestResponseStreams(t *testing.T) {

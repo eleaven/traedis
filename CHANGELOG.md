@@ -3,6 +3,25 @@
 What each release changes for those who use the plugin, the latest first. The section of a version is the text of its
 [GitHub release](https://github.com/eleaven/traedis/releases): the CI reads it from this file.
 
+## v0.3.1
+
+A security fix: clients can no longer have a redirection that loops stored for everyone.
+
+### Security
+
+- **A client could have every client redirected in a loop.** A `301` or a `308` is stored for `defaultTtl` even without `Cache-Control`,
+  and the backend may answer one because of a header field that the cache key does not have: Rails' `force_ssl` takes the scheme of
+  `X-Forwarded-Scheme` or `X-Forwarded-Ssl`, which Traefik leaves to the clients, and some backends compare the case of the host with their
+  own, which the key lowercases. With `X-Forwarded-Scheme: http` on an `https` request, or `Host: EXAMPLE.com`, a client got the
+  redirection to the URL it had asked for stored, then served to all the others, who followed it in a loop, for as long as it wanted. A
+  redirection to its own URL, its default port and the case of its host aside, is now never stored, even with explicit freshness.
+
+### Documentation
+
+- **[Security](https://github.com/eleaven/traedis/blob/v0.3.1/README.md#security): what the response depends on must be in `Vary`.** The
+  README now tells which redirections the cache keeps out, and that with a `statusCodes` that lists errors, a header field that `Vary` does
+  not name can have one stored for everyone (`X-HTTP-Method-Override` makes some backends answer `405`).
+
 ## v0.3.0 – 2026-10-17
 
 Security fixes, and a cache that stores more by default. Clients can no longer poison the cache with the content of a `GET`, replace a

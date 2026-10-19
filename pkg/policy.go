@@ -335,6 +335,11 @@ func storeTTL(req *http.Request, reqCC cacheControl, e *entry, cc cacheControl, 
 	if hasHeaderValue(h, "Trailer") || hasTrailerPrefix(h) {
 		return 0, false
 	}
+	// A redirection to its own URI would answer the requests it sends its clients back with, in a loop for everyone: its backend saw a
+	// request that the key does not tell from the others.
+	if status >= 300 && status < 400 && redirectsToItself(req, h, cfg.sortQuery) {
+		return 0, false
+	}
 
 	setFreshness(e, cc)
 	lifetime := e.lifetime

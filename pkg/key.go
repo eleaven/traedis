@@ -2,6 +2,7 @@ package traedis
 
 import (
 	"net/http"
+	"net/url"
 	"sort"
 	"strings"
 )
@@ -28,32 +29,57 @@ func cacheURI(r *http.Request, sortQuery bool) string {
 		}
 	}
 
-	// Host
 	host := r.Host
 	if host == "" {
 		host = r.URL.Host
 	}
-	host = strings.ToLower(host)
+	return normalizedURI(scheme, host, r.URL.EscapedPath(), r.URL.RawQuery, sortQuery)
+}
 
-	// Path
-	path := r.URL.EscapedPath()
+// normalizedURI writes a URI from its parts as cacheURI does: lowercased host, "/" for an empty path, and the query sorted with sortQuery.
+func normalizedURI(scheme, host, path, query string, sortQuery bool) string {
 	if path == "" {
 		path = "/"
 	}
-
-	// Query
-	query := r.URL.RawQuery
 	if sortQuery {
 		query = sortedQuery(query)
 	}
-
-	// URI
-	uri := scheme + "://" + host + path
+	uri := scheme + "://" + strings.ToLower(host) + path
 	if query != "" {
 		uri += "?" + query
 	}
-
 	return uri
+}
+
+// redirectsToItself reports whether a response with header h, to r, has a Location that leads back to its own URI, as cacheURI writes it,
+// whatever the port its scheme has by default. Served from the cache, such a redirection sends every client in a loop: the backend saw
+// another request than the key does, which a header field that it reads tells it (X-Forwarded-Scheme, X-Forwarded-Ssl…), or the case of
+// the host. A Location that cannot be parsed leads elsewhere.
+func redirectsToItself(r *http.Request, h http.Header, sortQuery bool) bool {
+	location := h.Get("Location")
+	if location == "" {
+		return false
+	}
+	self, err := url.Parse(cacheURI(r, sortQuery))
+	if err != nil {
+		return false
+	}
+	// Relative to the URI of the request; its fragment is not part of it.
+	target, err := self.Parse(location)
+	if err != nil {
+		return false
+	}
+	return comparableURI(self, sortQuery) == comparableURI(target, sortQuery)
+}
+
+// comparableURI writes u as normalizedURI does, without the port its scheme has by default: https://example.com:443/ is
+// https://example.com/.
+func comparableURI(u *url.URL, sortQuery bool) string {
+	host := u.Host
+	if (u.Scheme == "http" && strings.HasSuffix(host, ":80")) || (u.Scheme == "https" && strings.HasSuffix(host, ":443")) {
+		host = host[:strings.LastIndexByte(host, ':')]
+	}
+	return normalizedURI(u.Scheme, host, u.EscapedPath(), u.RawQuery, sortQuery)
 }
 
 // sortedQuery sorts raw query parameters by name, without decoding them, and drops the empty ones. The sort is stable so repeated names
