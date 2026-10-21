@@ -22,7 +22,7 @@ func TestCreateConfigDefaults(t *testing.T) {
 	if n := len(s.statusCodes); n != 198 || s.statusCodes[0] != 200 || s.statusCodes[n-1] != 399 {
 		t.Errorf("statusCodes = %v", s.statusCodes)
 	}
-	if s.defaultTTL != 5*time.Minute || s.staleTTL != time.Hour {
+	if s.defaultTTL != 0 || s.staleTTL != time.Hour {
 		t.Errorf("defaultTTL = %v, staleTTL = %v", s.defaultTTL, s.staleTTL)
 	}
 	if s.defaultStaleWhileRevalidate != 0 || s.defaultStaleIfError != 0 {
@@ -356,7 +356,7 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.Redis.RetryAfter = "1s"
 	cfg.Redis.TLS = RedisTLSConfig{CA: "", InsecureSkipVerify: false}
 	cfg.StatusCodes = []string{"200-399"}
-	cfg.DefaultTTL = "5m"
+	cfg.DefaultTTL = "0"
 	cfg.StaleTTL = "1h"
 	cfg.DefaultStaleWhileRevalidate = "0s"
 	cfg.DefaultStaleIfError = "0s"

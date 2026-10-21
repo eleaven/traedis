@@ -79,7 +79,7 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `redis.maxFailures`            | `5`                    | Failures in a row after which Redis is [no longer asked](#redis-failures). `0`: every request tries it.                                        |
 | `redis.retryAfter`             | `1s`                   | How often Redis is tried again once it is no longer asked.                                                                                     |
 | `statusCodes`                  | `["200-399"]`          | Codes (`404`) and ranges (`400-499`) that may be stored. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable. |
-| `defaultTtl`                   | `5m`                   | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires`. `0` disables it.                                                       |
+| `defaultTtl`                   | `0`                    | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires` (`5m`). `0`: not stored. See [Security](#security).                     |
 | `staleTtl`                     | `1h`                   | How long an entry is kept in Redis after it expires: the upper bound of every [stale response](#stale-responses). `0` disables them.           |
 | `defaultStaleWhileRevalidate`  | `0s`                   | `stale-while-revalidate` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                              |
 | `defaultStaleIfError`          | `0s`                   | `stale-if-error` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                                      |
@@ -112,8 +112,8 @@ The response of the backend says whether it may be stored, for how long, and whe
   - `must-revalidate`, `proxy-revalidate`: never served stale.
   - `stale-while-revalidate=N`: once stale, still served for `N` seconds, and refreshed in the background.
   - `stale-if-error=N`: once stale, still served for `N` seconds in place of an error of the backend.
-- `Expires`: until when it is fresh, without `max-age` nor `s-maxage`. Without any of the three, `defaultTtl` applies, unless the exchange
-  has `Authorization`, `Cookie` or `Set-Cookie`.
+- `Expires`: until when it is fresh, without `max-age` nor `s-maxage`. Without any of the three, the response is not stored, unless a
+  `defaultTtl` is set: it then applies, but not when the exchange has `Authorization`, `Cookie` or `Set-Cookie`.
 - `Age`, `Date`: how old the response already is. It is stored for the freshness it has left.
 - `Vary`: one stored [variant](#variants) per value of the request header fields it names. Not stored with `*`, `Cookie` or
   `Authorization` (one variant per user).
@@ -184,7 +184,7 @@ Responses are stored by middleware and by URL (scheme, host with its case, path 
 
 - the request is a `GET` (a `HEAD` is answered from the stored `GET`);
 - its status is listed in `statusCodes`;
-- it is fresh, through `s-maxage`, `max-age`, `Expires` or `defaultTtl`;
+- it is fresh, through `s-maxage`, `max-age`, `Expires` or, when it is set, `defaultTtl`;
 - no [header field](#http-headers) of the request or of the response forbids it;
 - it is not a redirection to its own URL (its default port and the case of its host aside), which would send every client back to it in a
   loop (see [Security](#security));
@@ -329,6 +329,9 @@ The cache never fails a request because of Redis: what Redis cannot answer in ti
 A shared cache gives the response made for one client to all the others. The defaults are careful (see
 [HTTP headers](#http-headers)), but the cache only knows what the backend and the configuration tell it:
 
+- **`defaultTtl` stores what the backend said nothing about.** A backend that sends no `Cache-Control` has often not thought of caches,
+  and the cache cannot always tell its personalized pages from the others (see below). `defaultTtl` is `0` by default: set it only for
+  the backends whose responses without `Cache-Control` are the same for every client.
 - **A cookie does not make a response private.** Cookies are not part of the cache key: a response with `max-age`, `s-maxage` or `Expires`
   is stored and shared even when its request had a `Cookie` (only `defaultTtl` is never applied to an exchange with `Authorization`,
   `authorizationHeaders`, `Cookie` or `Set-Cookie`). Whatever depends on the session must say `Cache-Control: private` or `no-store`. In the
@@ -339,9 +342,9 @@ A shared cache gives the response made for one client to all the others. The def
 - **Middlewares listed after the cache don't run on a hit.** `basicAuth`, `forwardAuth`, `ipAllowList` and `rateLimit` go before it. The
   cache does not know who they let in: what it stores is shared by all of them.
 - **The cache only knows `Authorization`.** A middleware that replaces it with a header field of its own (`basicAuth` with `removeHeader`
-  and `headerField`, `forwardAuth` with `authResponseHeaders`), or an API key in a header field, makes the request look anonymous: the
-  response it gets without `Cache-Control` is stored for `defaultTtl`, and the page of one user served to the others. List these header
-  fields in `authorizationHeaders` (`[X-WebAuth-User]`): their requests are then treated as those with `Authorization`.
+  and `headerField`, `forwardAuth` with `authResponseHeaders`), or an API key in a header field, makes the request look anonymous: with a
+  `defaultTtl`, the response it gets without `Cache-Control` is stored for it, and the page of one user served to the others. List these
+  header fields in `authorizationHeaders` (`[X-WebAuth-User]`): their requests are then treated as those with `Authorization`.
 - **The key is the URL the cache sees, not the router.** The routers that use the same cache middleware share its stored responses: when
   two of them answer the same URL with different backends, one kept for some clients (by `ClientIP`, a header, an entry point…) and the
   other not, each one serves what the other stored. A middleware that rewrites the URL before the cache (`stripPrefix`, `replacePath`…)
@@ -381,8 +384,8 @@ A shared cache gives the response made for one client to all the others. The def
   `?x=1`, `?x=2`… store the same response again and again, each one up to `maxBodyBytes` and for its freshness plus `staleTtl`. Nothing
   bounds the number of URLs: a client can fill Redis with entries that nobody asks for again (flooding), which then take the place of the
   useful ones (pollution). Give Redis a `maxmemory` with the `allkeys-lfu` policy, so that entries requested once are evicted first, and
-  have the backend refuse the URLs it does not know: with the default `statusCodes`, no error is stored. A redirection is: a `301` or a
-  `308` for `defaultTtl` even without `Cache-Control`, a `302`, `303` or `307` only with `s-maxage`, `max-age` or `Expires`.
+  have the backend refuse the URLs it does not know: with the default `statusCodes`, no error is stored. A redirection is, with
+  `s-maxage`, `max-age` or `Expires`, and a `301` or a `308` even without them when a `defaultTtl` is set.
 - **Redirections are shared too.** A backend that sends the same `Cache-Control: public, max-age=…` on all its responses has its
   redirection of anonymous clients to its login page stored, then served to the clients that are logged in. Have it send `private` or
   `no-store` with what depends on the client, redirections included, or leave `3xx` out of `statusCodes` (`["200-299"]`).

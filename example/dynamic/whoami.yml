@@ -136,12 +136,14 @@ http:
         traedis:
           redis:
             dsn: "redis://cache:6379/2"
+          defaultTtl: 5m # 0 by default: whoami sends no Cache-Control, nothing would be stored
           maxBodyBytes: 5120 # 5 KiB
     whoami-client:
       plugin:
         traedis:
           redis:
             dsn: "redis://cache:6379/2"
+          defaultTtl: 5m
           ignoreClientCacheControl: false # on by default: request directives are advisory (RFC 9111 §5.2.1)
           maxBodyBytes: 2048 # 2 KiB: whoami echoes the request headers, large ones make a response too large to be stored
     whoami-auth:
@@ -156,12 +158,14 @@ http:
         traedis:
           redis:
             dsn: "redis://cache:6379/2"
+          defaultTtl: 5m
           authorizationHeaders: [ X-WebAuth-User ]
     whoami-hidden:
       plugin:
         traedis:
           redis:
             dsn: "redis://cache:6379/2"
+          defaultTtl: 5m
           exposeCacheStatus: false
     whoami-vary:
       plugin:
@@ -174,18 +178,21 @@ http:
         traedis:
           redis:
             dsn: "redis://cache:6379/2"
+          defaultTtl: 5m
           sortQuery: true # off by default: for RFC 9111, these are two URLs
     whoami-key:
       plugin:
         traedis:
           redis:
             dsn: "redis://cache:6379/2"
+          defaultTtl: 5m
           exposeKey: true # the Redis key in `Cache-Status`: it starts with the name of the middleware
     whoami-key-tenant:
       plugin:
         traedis:
           redis:
             dsn: "redis://cache:6379/2"
+          defaultTtl: 5m
           exposeKey: true
     whoami-tls:
       plugin:
@@ -194,6 +201,7 @@ http:
             dsn: "rediss://cache-tls:6379/0"
             tls:
               ca: /certs/redis.crt # self-signed: not one of the authorities of the system
+          defaultTtl: 5m
     whoami-tls-untrusted:
       plugin:
         traedis:

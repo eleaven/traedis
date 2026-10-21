@@ -1,4 +1,4 @@
-# defaultTtl (5m): heuristic freshness (RFC 9111 §4.2.2), whoami sends no Cache-Control.
+# defaultTtl (0 by default, 5m on /whoami-cache): heuristic freshness (RFC 9111 §4.2.2), whoami sends no Cache-Control.
 
 GET {{base_url}}/whoami-cache?run={{run}}
 [Options]

@@ -3,6 +3,15 @@
 What each release changes for those who use the plugin, the latest first. The section of a version is the text of its
 [GitHub release](https://github.com/eleaven/traedis/releases): the CI reads it from this file.
 
+## v0.4.0
+
+Safer defaults: see the breaking changes before upgrading.
+
+### ⚠️ Breaking changes
+
+- **`defaultTtl` is now `0`**: a response without `max-age`, `s-maxage` nor `Expires` is no longer stored. Set `defaultTtl: 5m` to keep
+  the previous behaviour, only for backends whose responses are the same for every client.
+
 ## v0.3.1
 
 Security fixes: clients can no longer have a redirection that loops, nor the page the backend makes for another case of the host, stored

@@ -275,7 +275,12 @@ func TestRevalidationOutcome(t *testing.T) {
 			mutate:  func(c *Config) { c.MaxBodyBytes = 10; c.StatusCodes = []string{"200", "404"} },
 			deleted: true,
 		},
-		{name: "a client's Cookie cannot evict it", reqHdr: http.Header{"Cookie": {"sid=1"}}, respHdr: http.Header{}},
+		{
+			name:    "a client's Cookie cannot evict it",
+			reqHdr:  http.Header{"Cookie": {"sid=1"}},
+			respHdr: http.Header{},
+			mutate:  withDefaultTTL,
+		},
 		{
 			name:    "a client's Authorization cannot evict it",
 			reqHdr:  http.Header{"Authorization": {"Bearer x"}},

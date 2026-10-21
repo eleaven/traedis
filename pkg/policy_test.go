@@ -664,6 +664,7 @@ func TestStoreTTL(t *testing.T) {
 				req.Header[k] = v
 			}
 			cfg := testSettings()
+			cfg.defaultTTL = 5 * time.Minute // 0 by default: the cases tell where it applies
 			if tt.mutate != nil {
 				tt.mutate(&cfg)
 			}

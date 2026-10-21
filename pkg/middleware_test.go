@@ -57,6 +57,11 @@ func honourClientCacheControl(cfg *Config) {
 	cfg.IgnoreClientCacheControl = false
 }
 
+// withDefaultTTL gives newTestCache a heuristic freshness (§4.2.2), which is off by default, for the tests of where it applies.
+func withDefaultTTL(cfg *Config) {
+	cfg.DefaultTTL = "5m"
+}
+
 // cacheKey returns the Redis key of a URI for the cache of newTestCache.
 func cacheKey(uri string) string {
 	return redisKey("cache", uri)
@@ -356,7 +361,10 @@ func TestClientCacheControlIgnored(t *testing.T) {
 // authorizationHeaders keep the response to a client from the others, as Authorization does (§3.5): the backend has to allow it.
 func TestAuthorizationHeaders(t *testing.T) {
 	b := &backend{header: http.Header{"Content-Type": {"text/plain"}}, body: "hello alice"}
-	c, st := newTestCache(t, b, func(cfg *Config) { cfg.AuthorizationHeaders = []string{"x-webauth-user"} })
+	c, st := newTestCache(t, b, func(cfg *Config) {
+		withDefaultTTL(cfg)
+		cfg.AuthorizationHeaders = []string{"x-webauth-user"}
+	})
 	alice := http.Header{"X-Webauth-User": {"alice"}}
 	doRequest(c, http.MethodGet, testURL, alice)
 	b.body = "hello bob"
@@ -958,7 +966,12 @@ func TestNotStored(t *testing.T) {
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"Accept-Encoding"}, "Content-Encoding": {"compress"}},
 		},
 		{name: "statusCodes narrows", status: 404, respHdr: http.Header{"Cache-Control": {"max-age=60"}}},
-		{name: "defaultTtl not applied to requests with Cookie", reqHdr: http.Header{"Cookie": {"sid=1"}}, respHdr: http.Header{}},
+		{
+			name:    "defaultTtl not applied to requests with Cookie",
+			reqHdr:  http.Header{"Cookie": {"sid=1"}},
+			respHdr: http.Header{},
+			mutate:  withDefaultTTL,
+		},
 		{
 			name:    "body larger than maxBodyBytes is streamed, not stored",
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
@@ -1015,6 +1028,13 @@ func TestSetCookieIsNotReplayed(t *testing.T) {
 func TestDefaultTTLWithoutExplicitFreshness(t *testing.T) {
 	b := &backend{body: "hello"}
 	c, st := newTestCache(t, b, nil)
+	doRequest(c, http.MethodGet, testURL, nil)
+	if st.sets != 0 {
+		t.Error("§4.2.2 no heuristic freshness by default: a response without explicit freshness must not be stored")
+	}
+
+	b = &backend{body: "hello"}
+	c, st = newTestCache(t, b, withDefaultTTL)
 	doRequest(c, http.MethodGet, testURL, nil)
 	rec := doRequest(c, http.MethodGet, testURL, nil)
 	if b.calls != 1 || !strings.HasPrefix(lastCacheStatus(rec), "traedis; hit; ttl=") {
@@ -1205,7 +1225,7 @@ func TestRedirectionToHTTPSIsNotServedToHTTPS(t *testing.T) {
 		}
 		w.Header().Set("Cache-Control", "max-age=60")
 		_, _ = io.WriteString(w, "secure")
-	}), nil)
+	}), withDefaultTTL)
 	plain := http.Header{"X-Forwarded-Proto": {"http"}}
 	secure := http.Header{"X-Forwarded-Proto": {"https"}}
 
@@ -1571,7 +1591,7 @@ func TestFreshnessIsStoredWithTheEntry(t *testing.T) {
 
 	// Without explicit freshness, defaultTtl applies as it is configured now.
 	b = &backend{header: http.Header{"Content-Type": {"text/plain"}}, body: "hello"}
-	c, st = newTestCache(t, b, nil)
+	c, st = newTestCache(t, b, withDefaultTTL)
 	doRequest(c, http.MethodGet, testURL, nil)
 	if e := st.entry(cacheKey(testURL), ""); e == nil || e.lifetime != -1 {
 		t.Fatalf("stored entry = %+v, want no explicit lifetime", e)

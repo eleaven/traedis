@@ -19,7 +19,7 @@ testData:
       ca: ""
       insecureSkipVerify: false
   statusCodes: [ "200-399" ]
-  defaultTtl: 5m
+  defaultTtl: 0
   staleTtl: 1h
   defaultStaleWhileRevalidate: 0s
   defaultStaleIfError: 0s

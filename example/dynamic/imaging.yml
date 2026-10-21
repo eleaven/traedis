@@ -47,6 +47,7 @@ http:
         traedis:
           redis:
             dsn: "redis://cache:6379/0"
+          defaultTtl: 5m # 0 by default: imgproxy sends no Cache-Control with its errors, which statusCodes keeps out here
 
     imaging-client:
       plugin:
@@ -60,6 +61,7 @@ http:
         traedis:
           redis:
             dsn: "redis://cache:6379/0"
+          defaultTtl: 5m
           statusCodes: [ "200-399", 404 ] # the default, and 404
 
   services:
