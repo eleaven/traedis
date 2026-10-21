@@ -12,6 +12,8 @@ Safer defaults: see the breaking changes before upgrading.
 - **`defaultTtl` is now `0`**: a response without `max-age`, `s-maxage` nor `Expires` is no longer stored. Set `defaultTtl: 5m` to keep
   the previous behaviour, only for backends whose responses are the same for every client.
 - **`redis.dsn` is required**: it no longer defaults to `redis://cache:6379/0`.
+- **`ignoreClientCacheControl` is renamed `followClientCacheControl`**, with the opposite value: replace `ignoreClientCacheControl: false`
+  with `followClientCacheControl: true`. The old key is silently ignored.
 
 ## v0.3.1
 

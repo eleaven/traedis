@@ -144,7 +144,7 @@ http:
           redis:
             dsn: "redis://cache:6379/2"
           defaultTtl: 5m
-          ignoreClientCacheControl: false # on by default: request directives are advisory (RFC 9111 §5.2.1)
+          followClientCacheControl: true # off by default: request directives are advisory (RFC 9111 §5.2.1)
           maxBodyBytes: 2048 # 2 KiB: whoami echoes the request headers, large ones make a response too large to be stored
     whoami-auth:
       basicAuth:
@@ -215,7 +215,7 @@ http:
           defaultTtl: 2s
           defaultStaleWhileRevalidate: 10s
           defaultStaleIfError: 1m
-          ignoreClientCacheControl: false # e2e/tests/stale.hurl reloads like a browser
+          followClientCacheControl: true # e2e/tests/stale.hurl reloads like a browser
 
   services:
     whoami:

@@ -606,7 +606,7 @@ func TestHeadIsServedFromVariant(t *testing.T) {
 
 func TestOnlyIfCachedVaryMissIs504(t *testing.T) {
 	b := &negotiator{vary: "Accept-Language"}
-	c, _ := newTestCache(t, b, honourClientCacheControl)
+	c, _ := newTestCache(t, b, followClientCacheControl)
 	doRequest(c, http.MethodGet, varyURL, http.Header{"Accept-Language": {"fr"}})
 
 	rec := doRequest(c, http.MethodGet, varyURL, http.Header{"Accept-Language": {"en"}, "Cache-Control": {"only-if-cached"}})
@@ -842,7 +842,7 @@ func TestVariantsAreCapped(t *testing.T) {
 	for _, limit := range []int{16, 1, 3} {
 		t.Run("maxVariants "+strconv.Itoa(limit), func(t *testing.T) {
 			b := &negotiator{vary: "Accept-Language"}
-			c, st := newTestCache(t, b, func(cfg *Config) { cfg.MaxVariants = limit; honourClientCacheControl(cfg) })
+			c, st := newTestCache(t, b, func(cfg *Config) { cfg.MaxVariants = limit; followClientCacheControl(cfg) })
 			key := cacheKey(varyURL)
 			lang := func(i int) http.Header {
 				return http.Header{"Accept-Language": {"l" + strconv.Itoa(i)}}
@@ -962,7 +962,7 @@ func TestVaryChanges(t *testing.T) {
 
 	t.Run("a response without Vary becomes varying", func(t *testing.T) {
 		b := &negotiator{}
-		c, st := newTestCache(t, b, honourClientCacheControl)
+		c, st := newTestCache(t, b, followClientCacheControl)
 		doRequest(c, http.MethodGet, varyURL, fr)
 		if rec := doRequest(c, http.MethodGet, varyURL, en); !isHit(lastCacheStatus(rec)) || rec.Body.String() != "lang=fr" {
 			t.Fatalf("without Vary, the entry is served to all: got %q %q", lastCacheStatus(rec), rec.Body.String())
@@ -980,7 +980,7 @@ func TestVaryChanges(t *testing.T) {
 
 	t.Run("a varying response loses its Vary", func(t *testing.T) {
 		b := &negotiator{vary: "Accept-Language"}
-		c, _ := newTestCache(t, b, honourClientCacheControl)
+		c, _ := newTestCache(t, b, followClientCacheControl)
 		doRequest(c, http.MethodGet, varyURL, fr)
 		b.vary = ""
 		doRequest(c, http.MethodGet, varyURL, refresh)
@@ -991,7 +991,7 @@ func TestVaryChanges(t *testing.T) {
 
 	t.Run("other Vary names", func(t *testing.T) {
 		b := &negotiator{vary: "Accept-Language"}
-		c, st := newTestCache(t, b, honourClientCacheControl)
+		c, st := newTestCache(t, b, followClientCacheControl)
 		doRequest(c, http.MethodGet, varyURL, fr)
 		b.vary = "Accept-Language, X-Device"
 		doRequest(c, http.MethodGet, varyURL, refresh)
@@ -1264,7 +1264,7 @@ func TestStaleIfErrorServesTheVariant(t *testing.T) {
 // One round trip per hit, variants included: the marker last seen in a key tells which variant to ask for along with it.
 func TestVariantIsReadInOneRoundTrip(t *testing.T) {
 	b := &negotiator{vary: "Accept-Language"}
-	c, st := newTestCache(t, b, honourClientCacheControl)
+	c, st := newTestCache(t, b, followClientCacheControl)
 	fr := http.Header{"Accept-Language": {"fr"}}
 	key := cacheKey(varyURL)
 	field := variantField([]string{"Accept-Language"}, fr, "")

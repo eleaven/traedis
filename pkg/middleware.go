@@ -83,7 +83,7 @@ func (c *cache) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// its own request (no-cache, max-age, min-fresh), read stale responses (max-stale) and tell what others requested without a trace
 	// (only-if-cached).
 	reqCC := parseCacheControl(nil)
-	if !c.cfg.ignoreClientCacheControl {
+	if c.cfg.followClientCacheControl {
 		reqCC = parseCacheControl(r.Header.Values("Cache-Control"))
 	}
 

@@ -52,9 +52,9 @@ func newTestCache(t *testing.T, b http.Handler, mutate func(*Config)) (*cache, *
 	return newCache(b, "cache", s, st), st
 }
 
-// honourClientCacheControl makes newTestCache act on the Cache-Control of requests, for the tests of request directives (§5.2.1).
-func honourClientCacheControl(cfg *Config) {
-	cfg.IgnoreClientCacheControl = false
+// followClientCacheControl makes newTestCache act on the Cache-Control of requests, for the tests of request directives (§5.2.1).
+func followClientCacheControl(cfg *Config) {
+	cfg.FollowClientCacheControl = true
 }
 
 // withDefaultTTL gives newTestCache a heuristic freshness (§4.2.2), which is off by default, for the tests of where it applies.
@@ -299,7 +299,7 @@ func TestRequestDirectives(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			b := cacheableBackend()
-			c, _ := newTestCache(t, b, honourClientCacheControl)
+			c, _ := newTestCache(t, b, followClientCacheControl)
 			doRequest(c, http.MethodGet, testURL, nil)
 			rec := doRequest(c, http.MethodGet, testURL, tt.header)
 			if b.calls != tt.wantCalls || rec.Code != tt.wantCode {
@@ -520,7 +520,7 @@ func TestMaxStale(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			b := cacheableBackend()
 			c, st := newTestCache(t, b, func(cfg *Config) {
-				honourClientCacheControl(cfg)
+				followClientCacheControl(cfg)
 				if tt.mutate != nil {
 					tt.mutate(cfg)
 				}
@@ -581,7 +581,7 @@ func TestMaxStaleWithStaleWhileRevalidate(t *testing.T) {
 
 func TestOnlyIfCachedMissIs504(t *testing.T) {
 	b := cacheableBackend()
-	c, _ := newTestCache(t, b, honourClientCacheControl)
+	c, _ := newTestCache(t, b, followClientCacheControl)
 	rec := doRequest(c, http.MethodGet, testURL, http.Header{"Cache-Control": {"only-if-cached"}})
 	if rec.Code != http.StatusGatewayTimeout || b.calls != 0 {
 		t.Errorf("§5.2.1.7 got %d with %d backend calls, want 504 and none", rec.Code, b.calls)
@@ -817,7 +817,7 @@ func TestStaleIfError(t *testing.T) {
 				body:   "error",
 			}
 			c, st := newTestCache(t, b, func(cfg *Config) {
-				honourClientCacheControl(cfg)
+				followClientCacheControl(cfg)
 				if tt.mutate != nil {
 					tt.mutate(cfg)
 				}

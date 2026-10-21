@@ -54,7 +54,7 @@ http:
         traedis:
           redis:
             dsn: "redis://cache:6379/0"
-          ignoreClientCacheControl: false # on by default: request directives are advisory (RFC 9111 §5.2.1)
+          followClientCacheControl: true # off by default: request directives are advisory (RFC 9111 §5.2.1)
 
     imaging-cache-errors:
       plugin:

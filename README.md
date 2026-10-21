@@ -90,7 +90,7 @@ All keys but `redis.dsn` are optional. Durations use the [Go syntax](https://pkg
 | `revalidationTimeout`          | `30s`                  | Maximum time of a background refresh.                                                                                                          |
 | `sortQuery`                    | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
 | `authorizationHeaders`         | `[]`                   | Request header fields that tell who the client is, as `Authorization` does (`X-WebAuth-User`): see [Security](#security).                      |
-| `ignoreClientCacheControl`     | `true`                 | Ignore the `Cache-Control` of requests, whose directives are advisory: see [Sent by the client](#sent-by-the-client).                          |
+| `followClientCacheControl`     | `false`                | Follow the `Cache-Control` of requests, whose directives are advisory: see [Sent by the client](#sent-by-the-client).                          |
 | `exposeCacheStatus`            | `true`                 | Add the [`Cache-Status`](#added-by-traedis) header to the responses: what the cache did. See [Security](#security).                            |
 | `exposeKey`                    | `false`                | Add the [Redis key](#cacheable-responses) to the `Cache-Status` header (`key="…"`). Requires `exposeCacheStatus`.                              |
 
@@ -125,10 +125,10 @@ The response of the backend says whether it may be stored, for how long, and whe
 
 The request of the client says whether a stored response may answer it.
 
-- `Cache-Control`: ignored by default (`ignoreClientCacheControl`). Its directives are advisory
+- `Cache-Control`: ignored by default (`followClientCacheControl`). Its directives are advisory
   ([RFC 9111 §5.2.1](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1)): followed, they let any client replace the stored response
   with what the backend answers to its own request, get a stale one, and tell whether a URL is stored without storing it (see
-  [Security](#security)). With `ignoreClientCacheControl: false`:
+  [Security](#security)). With `followClientCacheControl: true`:
   - `no-cache`: always forwarded, whatever is stored. The response is stored.
   - `no-store`: the response is not stored. A stored one can still answer.
   - `max-age=N`: refuses a stored response older than `N` seconds.
@@ -157,12 +157,12 @@ Traedis adds these to the responses it sends to the client, and to the requests 
 - `Cache-Status: traedis; …`: on every response, what the cache did ([RFC 9211][rfc9211]), unless `exposeCacheStatus` is `false`:
   - `hit; ttl=N`: served from the cache, fresh for `N` more seconds.
   - `hit; ttl=-N; detail=stale-while-revalidate`: served from the cache, stale by `N` seconds, and refreshed in the background.
-  - `hit; ttl=-N; detail=max-stale`: served from the cache, stale by `N` seconds, as the request allows (`ignoreClientCacheControl: false`).
+  - `hit; ttl=-N; detail=max-stale`: served from the cache, stale by `N` seconds, as the request allows (`followClientCacheControl: true`).
   - `fwd=uri-miss`: forwarded, nothing is stored for this URL.
   - `fwd=vary-miss`: forwarded, this URL has [variants](#variants), but none for this request.
   - `fwd=stale`: forwarded, the stored response is stale.
   - `fwd=request`: forwarded, the request says `no-cache`, or its `max-age` or `min-fresh` refuses a stored response that is still fresh
-    (`ignoreClientCacheControl: false`).
+    (`followClientCacheControl: true`).
   - `fwd=stale; fwd-status=304; ttl=N`: [validated](#conditional-requests) by the backend, the stored response is
     served, fresh for `N` seconds again.
   - `fwd=stale; fwd-status=503; ttl=-N; detail=stale-if-error`: the backend failed, the stored response is served in place of its error.
@@ -285,7 +285,7 @@ A stored response that is no longer fresh is served only when allowed, for at mo
 - **`stale-if-error`**: it replaces a `500`, `502`, `503` or `504`, including those of Traefik when the backend is unreachable. A request
   with `max-age` or `min-fresh` gets it too, one with `no-cache` does not.
 - **`max-stale`** on the request ([RFC 9111 §5.2.1.2](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1.2)), with
-  `ignoreClientCacheControl: false`: it is served as it is, without asking the backend nor refreshing it.
+  `followClientCacheControl: true`: it is served as it is, without asking the backend nor refreshing it.
 
 As [RFC 9111][rfc9111] requires, `must-revalidate`, `proxy-revalidate`, `s-maxage` and `no-cache` forbid all three:
 `max-age=60, stale-while-revalidate=300` is served stale, `s-maxage=60, stale-while-revalidate=300` is not.
@@ -352,7 +352,7 @@ A shared cache gives the response made for one client to all the others. The def
   each, and rewrite the URL after it.
 - **What the response depends on must be in `Vary`.** When the backend reads a request header that its `Vary` does not name
   (`Forwarded`, `X-Original-URL`, `User-Agent`, `Accept-Language`…), one client chooses what the others get. Traefik replaces the
-  `X-Forwarded-*` header fields of the clients it does not trust, but not these. With `ignoreClientCacheControl: false`, it also chooses
+  `X-Forwarded-*` header fields of the clients it does not trust, but not these. With `followClientCacheControl: true`, it also chooses
   when: `Cache-Control: no-cache` replaces the stored response with what the backend answers to its request. The cache only tells one such
   response from the others: a redirection to its own URL, which it never stores. A backend sends one when it takes the scheme of a header
   field that Traefik leaves to the clients (`X-Forwarded-Scheme` or `X-Forwarded-Ssl` for Rails' `force_ssl`): stored for `defaultTtl`,
@@ -363,7 +363,7 @@ A shared cache gives the response made for one client to all the others. The def
   point. Otherwise, `https` requests reach Traefik over `http` like the others and share their stored responses: a redirection of the
   `http` requests to `https` then answers the `https` ones too, which follow it in a loop.
 - **Clients can always reach the backend.** A random query string is a miss (and `Cache-Control: no-cache` skips the cache, with
-  `ignoreClientCacheControl: false`): put a `rateLimit` before it.
+  `followClientCacheControl: true`): put a `rateLimit` before it.
 - **Clients can tell what others requested.** A response served from the cache has a `Cache-Status` that says so, and an `Age`, which
   [RFC 9111 §4][rfc9111] requires: a client learns whether someone else requested a URL (`/export?user=42`), and when. With
   `exposeCacheStatus: false`, clients no longer see what the cache did (`fwd-status` of the backend, `detail=redis`…), but `Age` still

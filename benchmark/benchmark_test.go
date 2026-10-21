@@ -185,10 +185,10 @@ func BenchmarkMiss(b *testing.B) {
 // BenchmarkStore measures the write path on larger bodies: recording, encoding, HSETEX. The client sends no-cache, honoured here (requests'
 // Cache-Control is ignored by default), so the response is fetched and stored again over the same key: nothing piles up in Redis.
 func BenchmarkStore(b *testing.B) {
-	honourClient := func(cfg *traedis.Config) { cfg.IgnoreClientCacheControl = false }
+	followClient := func(cfg *traedis.Config) { cfg.FollowClientCacheControl = true }
 	for _, size := range sizes {
 		b.Run(size.name, func(b *testing.B) {
-			h := newHandler(b, &backend{body: make([]byte, size.bytes), cacheControl: longLived}, defaultMaxBody, honourClient)
+			h := newHandler(b, &backend{body: make([]byte, size.bytes), cacheControl: longLived}, defaultMaxBody, followClient)
 			path := "/store/" + size.name
 			req := newRequest(http.MethodGet, path)
 			req.Header.Set("Cache-Control", "no-cache")

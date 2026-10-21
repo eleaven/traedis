@@ -199,7 +199,7 @@ func TestNotServedWhileRevalidating(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			b := cacheableBackend()
 			c, st := newTestCache(t, b, func(cfg *Config) {
-				honourClientCacheControl(cfg)
+				followClientCacheControl(cfg)
 				if tt.mutate != nil {
 					tt.mutate(cfg)
 				}

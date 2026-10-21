@@ -628,7 +628,7 @@ func TestClientConditionsWithoutStoredResponse(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			o := newOrigin()
-			c, st := newTestCache(t, o, honourClientCacheControl)
+			c, st := newTestCache(t, o, followClientCacheControl)
 			method := tt.method
 			if method == "" {
 				method = http.MethodGet
@@ -886,7 +886,7 @@ func TestValidationOutcome(t *testing.T) {
 			if tt.origin != nil {
 				tt.origin(o)
 			}
-			c, st := newTestCache(t, o, honourClientCacheControl)
+			c, st := newTestCache(t, o, followClientCacheControl)
 			cacheControl := tt.cacheControl
 			if cacheControl == "" {
 				cacheControl = "max-age=60"
@@ -1276,7 +1276,7 @@ func TestHeadFreshensStoredResponse(t *testing.T) {
 			if tt.origin != nil {
 				tt.origin(o)
 			}
-			c, st := newTestCache(t, o, honourClientCacheControl)
+			c, st := newTestCache(t, o, followClientCacheControl)
 			storeValidated(t, st, tt.cacheControl, 2*time.Minute)
 
 			rec := doRequest(c, http.MethodHead, staleURL, tt.reqHdr)

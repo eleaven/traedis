@@ -36,7 +36,7 @@ type Config struct {
 	RevalidationTimeout         string      `json:"revalidationTimeout,omitempty"`
 	SortQuery                   bool        `json:"sortQuery,omitempty"`
 	AuthorizationHeaders        []string    `json:"authorizationHeaders,omitempty"`
-	IgnoreClientCacheControl    bool        `json:"ignoreClientCacheControl,omitempty"`
+	FollowClientCacheControl    bool        `json:"followClientCacheControl,omitempty"`
 	ExposeCacheStatus           bool        `json:"exposeCacheStatus,omitempty"`
 	ExposeKey                   bool        `json:"exposeKey,omitempty"`
 }
@@ -82,7 +82,7 @@ func CreateConfig() *Config {
 		RevalidationTimeout:         "30s",
 		SortQuery:                   false,
 		AuthorizationHeaders:        []string{},
-		IgnoreClientCacheControl:    true,
+		FollowClientCacheControl:    false,
 		ExposeCacheStatus:           true,
 		ExposeKey:                   false,
 	}
@@ -110,8 +110,8 @@ type settings struct {
 	// authorizationHeaders lists the request header fields that tell who the client is, as Authorization does (see storeTTL): canonical
 	// names.
 	authorizationHeaders []string
-	// ignoreClientCacheControl makes the cache act as if requests had no Cache-Control (see ServeHTTP).
-	ignoreClientCacheControl bool
+	// followClientCacheControl makes the cache act on the Cache-Control of requests, which it ignores otherwise (see ServeHTTP).
+	followClientCacheControl bool
 	exposeCacheStatus        bool
 	exposeKey                bool
 }
@@ -236,7 +236,7 @@ func parseConfig(cfg *Config) (settings, error) {
 	if s.authorizationHeaders, err = parseHeaderNames("authorizationHeaders", cfg.AuthorizationHeaders); err != nil {
 		return s, err
 	}
-	s.ignoreClientCacheControl = cfg.IgnoreClientCacheControl
+	s.followClientCacheControl = cfg.FollowClientCacheControl
 	// The key is part of Cache-Status.
 	if cfg.ExposeKey && !cfg.ExposeCacheStatus {
 		return s, errors.New("exposeKey requires exposeCacheStatus")

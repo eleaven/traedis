@@ -44,10 +44,10 @@ func TestCreateConfigDefaults(t *testing.T) {
 	if s.maxRevalidations != 10 || s.revalidationTimeout != 30*time.Second {
 		t.Errorf("maxRevalidations = %d, revalidationTimeout = %v", s.maxRevalidations, s.revalidationTimeout)
 	}
-	if len(s.authorizationHeaders) != 0 || !s.ignoreClientCacheControl || !s.exposeCacheStatus {
+	if len(s.authorizationHeaders) != 0 || s.followClientCacheControl || !s.exposeCacheStatus {
 		t.Errorf(
-			"authorizationHeaders = %v, ignoreClientCacheControl = %v, exposeCacheStatus = %v",
-			s.authorizationHeaders, s.ignoreClientCacheControl, s.exposeCacheStatus,
+			"authorizationHeaders = %v, followClientCacheControl = %v, exposeCacheStatus = %v",
+			s.authorizationHeaders, s.followClientCacheControl, s.exposeCacheStatus,
 		)
 	}
 	if s.maxBodyBytes != 5242880 || s.maxBufferedBytes != 64<<20 || s.maxVariants != 16 || s.sortQuery || s.exposeKey {
@@ -378,7 +378,7 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.RevalidationTimeout = "30s"
 	cfg.SortQuery = false
 	cfg.AuthorizationHeaders = []string{}
-	cfg.IgnoreClientCacheControl = true
+	cfg.FollowClientCacheControl = false
 	cfg.ExposeCacheStatus = true
 	cfg.ExposeKey = false
 

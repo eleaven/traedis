@@ -25,7 +25,7 @@ HTTP 200
 [Asserts]
 header "Cache-Status" contains "traedis; hit; ttl="
 
-# /whoami-client acts on them (ignoreClientCacheControl: false)
+# /whoami-client acts on them (followClientCacheControl: true)
 
 # no-store (§5.2.1.5): the response is not stored
 GET {{base_url}}/whoami-client?run={{run}}
