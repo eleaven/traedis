@@ -358,8 +358,8 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.StatusCodes = []string{"200-399"}
 	cfg.DefaultTTL = "0"
 	cfg.StaleTTL = "1h"
-	cfg.DefaultStaleWhileRevalidate = "0s"
-	cfg.DefaultStaleIfError = "0s"
+	cfg.DefaultStaleWhileRevalidate = "0"
+	cfg.DefaultStaleIfError = "0"
 	cfg.MaxBodyBytes = 5242880
 	cfg.MaxBufferedBytes = 67108864
 	cfg.MaxVariants = 16

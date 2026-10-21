@@ -81,8 +81,8 @@ All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#Par
 | `statusCodes`                  | `["200-399"]`          | Codes (`404`) and ranges (`400-499`) that may be stored. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable. |
 | `defaultTtl`                   | `0`                    | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires` (`5m`). `0`: not stored. See [Security](#security).                     |
 | `staleTtl`                     | `1h`                   | How long an entry is kept in Redis after it expires: the upper bound of every [stale response](#stale-responses). `0` disables them.           |
-| `defaultStaleWhileRevalidate`  | `0s`                   | `stale-while-revalidate` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                              |
-| `defaultStaleIfError`          | `0s`                   | `stale-if-error` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                                      |
+| `defaultStaleWhileRevalidate`  | `0`                    | `stale-while-revalidate` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                              |
+| `defaultStaleIfError`          | `0`                    | `stale-if-error` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                                      |
 | `maxBodyBytes`                 | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached. At most 512 MiB, the largest value Redis takes.                                    |
 | `maxBufferedBytes`             | `67108864` (64 MiB)    | [Bodies held in memory](#security) at once, in each Traefik instance: past it, the cache is bypassed. At least `maxBodyBytes`.                 |
 | `maxVariants`                  | `16`                   | Stored [variants](#variants) per URL. `0`: responses with `Vary` are not cached.                                                               |

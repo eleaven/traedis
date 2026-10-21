@@ -21,8 +21,8 @@ testData:
   statusCodes: [ "200-399" ]
   defaultTtl: 0
   staleTtl: 1h
-  defaultStaleWhileRevalidate: 0s
-  defaultStaleIfError: 0s
+  defaultStaleWhileRevalidate: 0
+  defaultStaleIfError: 0
   maxBodyBytes: 5242880
   maxBufferedBytes: 67108864
   maxVariants: 16
