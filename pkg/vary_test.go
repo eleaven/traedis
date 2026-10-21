@@ -567,10 +567,10 @@ func TestVariants(t *testing.T) {
 	if !ok {
 		t.Fatal("variant not stored in its field")
 	}
-	if want := time.Minute + time.Hour; !closeTo(v.ttl, want) {
+	if want := time.Minute; !closeTo(v.ttl, want) {
 		t.Errorf("stored ttl = %v, want %v", v.ttl, want)
 	}
-	if mk, _ := st.lookup(key, ""); mk.ttl != v.ttl && !closeTo(mk.ttl, time.Minute+time.Hour) {
+	if mk, _ := st.lookup(key, ""); mk.ttl != v.ttl && !closeTo(mk.ttl, time.Minute) {
 		t.Errorf("marker ttl = %v, want the one of its variant", mk.ttl)
 	}
 	if body, _ := st.lookup(key, bodyField(field)); body.ttl != v.ttl {

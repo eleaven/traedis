@@ -332,16 +332,16 @@ func TestStoreTTL(t *testing.T) {
 		want    time.Duration // 0 means not stored
 	}{
 		{
-			name:    "§3 explicit max-age stored with remaining freshness + staleTtl",
+			name:    "§3 explicit max-age stored for its remaining freshness",
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "TTL subtracts the initial age",
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"max-age=300"}, "Age": {"250"}},
-			want:    50*time.Second + time.Hour,
+			want:    50 * time.Second,
 		},
 		{
 			name:    "already stale on arrival is not stored",
@@ -352,7 +352,7 @@ func TestStoreTTL(t *testing.T) {
 			name:    "§4.2.2 defaultTtl when no explicit freshness",
 			status:  200,
 			respHdr: http.Header{"Date": {date}},
-			want:    5*time.Minute + time.Hour,
+			want:    5 * time.Minute,
 		},
 		{name: "defaultTtl 0 means not stored", status: 200, respHdr: http.Header{}, mutate: func(s *settings) { s.defaultTTL = 0 }},
 		{name: "§3 only GET is stored", method: http.MethodHead, status: 200, respHdr: http.Header{"Cache-Control": {"max-age=60"}}},
@@ -373,7 +373,7 @@ func TestStoreTTL(t *testing.T) {
 			name:    "§5.2.2.3 must-understand with a status the cache knows",
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"must-understand, max-age=60"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "§5.2.2.3 must-understand with an unknown status",
@@ -386,7 +386,7 @@ func TestStoreTTL(t *testing.T) {
 			status:  299,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
 			mutate:  func(s *settings) { s.statusCodes = []int{299} },
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "§5.2.2.3 no-store still wins over must-understand",
@@ -399,14 +399,14 @@ func TestStoreTTL(t *testing.T) {
 			status:  404,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
 			mutate:  func(s *settings) { s.statusCodes = []int{200, 404} },
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{name: "default statusCodes: no error stored", status: 500, respHdr: http.Header{"Cache-Control": {"max-age=60"}}},
 		{
 			name:    "default statusCodes: §4.2.2 defaultTtl for a 301",
 			status:  301,
 			respHdr: http.Header{"Location": {"/b"}},
-			want:    5*time.Minute + time.Hour,
+			want:    5 * time.Minute,
 		},
 		{
 			name:    "default statusCodes: §4.2.2 defaultTtl only for heuristically cacheable codes",
@@ -417,7 +417,7 @@ func TestStoreTTL(t *testing.T) {
 			name:    "default statusCodes: §3 explicit freshness makes a 302 storable",
 			status:  302,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Location": {"/b"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{name: "redirection to itself not stored", status: 301, respHdr: http.Header{"Location": {"http://example.com/"}}},
 		{
@@ -429,14 +429,14 @@ func TestStoreTTL(t *testing.T) {
 			name:    "redirection to another scheme stored",
 			status:  301,
 			respHdr: http.Header{"Location": {"https://example.com/"}},
-			want:    5*time.Minute + time.Hour,
+			want:    5 * time.Minute,
 		},
 		{
 			name:    "Location of another status is not looked at",
 			status:  201,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Location": {"/"}},
 			mutate:  func(s *settings) { s.statusCodes = []int{201} },
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "Content-Range never stored",
@@ -454,21 +454,21 @@ func TestStoreTTL(t *testing.T) {
 			reqHdr:  http.Header{"Authorization": {"Bearer x"}},
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"public, max-age=60"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "§3.5 Authorization with s-maxage",
 			reqHdr:  http.Header{"Authorization": {"Bearer x"}},
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"s-maxage=60"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "§3.5 Authorization with must-revalidate",
 			reqHdr:  http.Header{"Authorization": {"Bearer x"}},
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"must-revalidate, max-age=60"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "no defaultTtl for Authorization even if public",
@@ -496,7 +496,7 @@ func TestStoreTTL(t *testing.T) {
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"public, max-age=60"}},
 			mutate:  withAuthorizationHeader,
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "authorizationHeaders: an empty value tells nobody",
@@ -504,7 +504,7 @@ func TestStoreTTL(t *testing.T) {
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
 			mutate:  withAuthorizationHeader,
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "authorizationHeaders: request without them",
@@ -512,14 +512,14 @@ func TestStoreTTL(t *testing.T) {
 			status:  200,
 			respHdr: http.Header{},
 			mutate:  withAuthorizationHeader,
-			want:    5*time.Minute + time.Hour,
+			want:    5 * time.Minute,
 		},
 		{
 			name:    "no authorizationHeaders by default",
 			reqHdr:  http.Header{"X-Webauth-User": {"alice"}},
 			status:  200,
 			respHdr: http.Header{},
-			want:    5*time.Minute + time.Hour,
+			want:    5 * time.Minute,
 		},
 		{name: "no defaultTtl for requests with Cookie", reqHdr: http.Header{"Cookie": {"sid=1"}}, status: 200, respHdr: http.Header{}},
 		{
@@ -546,7 +546,7 @@ func TestStoreTTL(t *testing.T) {
 			reqHdr:  http.Header{"Cookie": {"sid=1"}},
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{name: "Set-Cookie", status: 200, respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Set-Cookie": {"sid=1"}}},
 		{
@@ -558,13 +558,13 @@ func TestStoreTTL(t *testing.T) {
 			name:    `§5.2.2.7 Set-Cookie with private="Set-Cookie"`,
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {`max-age=60, private="Set-Cookie"`}, "Set-Cookie": {"sid=1"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    `§5.2.2.4 Set-Cookie with no-cache="Set-Cookie"`,
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {`max-age=60, no-cache="Set-Cookie"`}, "Set-Cookie": {"sid=1"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "§5.2.2.7 Set-Cookie with a qualified private naming another field",
@@ -575,13 +575,13 @@ func TestStoreTTL(t *testing.T) {
 			name:    "§5.2.2.7 qualified private is not private",
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {`max-age=60, private="X-User"`}, "X-User": {"bob"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "§5.2.2.4 qualified no-cache is not no-cache",
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {`max-age=60, no-cache="X-User"`}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    `no defaultTtl for Set-Cookie, even with private="Set-Cookie"`,
@@ -592,7 +592,7 @@ func TestStoreTTL(t *testing.T) {
 			name:    "§4.1 Vary",
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"Accept-Language"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{name: "§4.1 Vary: *", status: 200, respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"*"}}},
 		{
@@ -606,7 +606,7 @@ func TestStoreTTL(t *testing.T) {
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
 			mutate:  func(s *settings) { s.maxVariants = 0 },
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{name: "Vary: Cookie", status: 200, respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"Accept-Language, Cookie"}}},
 		{
@@ -618,13 +618,13 @@ func TestStoreTTL(t *testing.T) {
 			name:    "Vary: Accept-Encoding without Content-Encoding",
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"Accept-Encoding"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "Vary: Accept-Encoding with a known coding",
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"Accept-Encoding"}, "Content-Encoding": {"br"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{
 			name:    "Vary: Accept-Encoding with an unknown coding",
@@ -635,14 +635,14 @@ func TestStoreTTL(t *testing.T) {
 			name:    "unknown coding without Vary: Accept-Encoding",
 			status:  200,
 			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Content-Encoding": {"compress"}},
-			want:    time.Minute + time.Hour,
+			want:    time.Minute,
 		},
 		{name: "trailers not stored", status: 200, respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Trailer": {"X-Checksum"}}},
 		{
 			name:    "§4.2.1 Expires-based freshness",
 			status:  200,
 			respHdr: http.Header{"Date": {date}, "Expires": {t0.Add(10 * time.Minute).Format(http.TimeFormat)}},
-			want:    10*time.Minute + time.Hour,
+			want:    10 * time.Minute,
 		},
 		{name: "§5.3 invalid Expires not stored", status: 200, respHdr: http.Header{"Expires": {"0"}}},
 		{
@@ -673,6 +673,92 @@ func TestStoreTTL(t *testing.T) {
 			e := &entry{status: tt.status, header: tt.respHdr, requestTime: t0, responseTime: t0}
 			got, ok := storeTTL(req, reqCC, e, cc, cfg)
 			if ok != (tt.want > 0) || got != tt.want {
+				t.Errorf("storeTTL() = %v, %v; want %v", got, ok, tt.want)
+			}
+		})
+	}
+}
+
+// An entry is kept in Redis past its freshness only for as long as it may still be used: validated, or served stale (keptStale).
+func TestStoreTTLKeepsStaleEntriesOnlyWhenUsable(t *testing.T) {
+	tests := []struct {
+		name    string
+		respHdr http.Header
+		mutate  func(s *settings)
+		want    time.Duration
+	}{
+		{name: "nothing reads it once stale", respHdr: http.Header{"Cache-Control": {"max-age=60"}}, want: time.Minute},
+		{
+			name:    "§4.3.1 ETag: kept for validation",
+			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Etag": {`"v1"`}},
+			want:    time.Minute + time.Hour,
+		},
+		{
+			name:    "§4.3.1 Last-Modified: kept for validation",
+			respHdr: http.Header{"Cache-Control": {"max-age=60"}, "Last-Modified": {t0.Format(http.TimeFormat)}},
+			want:    time.Minute + time.Hour,
+		},
+		{
+			name:    "RFC 5861 stale-while-revalidate: kept for its window",
+			respHdr: http.Header{"Cache-Control": {"max-age=60, stale-while-revalidate=30"}},
+			want:    90 * time.Second,
+		},
+		{
+			name:    "RFC 5861: kept for the longest window",
+			respHdr: http.Header{"Cache-Control": {"max-age=60, stale-while-revalidate=30, stale-if-error=600"}},
+			want:    11 * time.Minute,
+		},
+		{
+			name:    "RFC 5861: a window is capped at staleTtl",
+			respHdr: http.Header{"Cache-Control": {"max-age=60, stale-if-error=7200"}},
+			want:    time.Minute + time.Hour,
+		},
+		{
+			name:    "defaultStaleIfError: kept for its window",
+			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
+			mutate:  func(s *settings) { s.defaultStaleIfError = 10 * time.Minute },
+			want:    11 * time.Minute,
+		},
+		{
+			name:    "a directive wins over the configured window",
+			respHdr: http.Header{"Cache-Control": {"max-age=60, stale-if-error=0"}},
+			mutate:  func(s *settings) { s.defaultStaleIfError = 10 * time.Minute },
+			want:    time.Minute,
+		},
+		{
+			name:    "§4.2.4 must-revalidate: never served stale",
+			respHdr: http.Header{"Cache-Control": {"max-age=60, must-revalidate, stale-if-error=600"}},
+			want:    time.Minute,
+		},
+		{
+			name:    "§5.2.2.10 s-maxage: never served stale",
+			respHdr: http.Header{"Cache-Control": {"s-maxage=60, stale-while-revalidate=30"}},
+			want:    time.Minute,
+		},
+		{
+			name:    "§5.2.1.2 followClientCacheControl: a request may accept it with max-stale",
+			respHdr: http.Header{"Cache-Control": {"max-age=60"}},
+			mutate:  func(s *settings) { s.followClientCacheControl = true },
+			want:    time.Minute + time.Hour,
+		},
+		{
+			name:    "staleTtl 0 keeps nothing",
+			respHdr: http.Header{"Cache-Control": {"max-age=60, stale-if-error=600"}, "Etag": {`"v1"`}},
+			mutate:  func(s *settings) { s.staleTTL = 0 },
+			want:    time.Minute,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+			cfg := testSettings()
+			if tt.mutate != nil {
+				tt.mutate(&cfg)
+			}
+			cc := parseCacheControl(tt.respHdr.Values("Cache-Control"))
+			e := &entry{status: 200, header: tt.respHdr, requestTime: t0, responseTime: t0}
+			got, ok := storeTTL(req, parseCacheControl(nil), e, cc, cfg)
+			if !ok || got != tt.want {
 				t.Errorf("storeTTL() = %v, %v; want %v", got, ok, tt.want)
 			}
 		})

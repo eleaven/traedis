@@ -133,7 +133,8 @@ func TestMissThenHit(t *testing.T) {
 	if !ok {
 		t.Fatal("response not stored")
 	}
-	if want := time.Minute + time.Hour; !closeTo(v.ttl, want) {
+	// Nothing can use it once stale (no validator, no stale window): it is not kept past its freshness.
+	if want := time.Minute; !closeTo(v.ttl, want) {
 		t.Errorf("stored ttl = %v, want %v", v.ttl, want)
 	}
 
@@ -1043,7 +1044,7 @@ func TestDefaultTTLWithoutExplicitFreshness(t *testing.T) {
 	if rec.Header().Get("Cache-Control") != "" {
 		t.Error("Cache-Control must never be rewritten")
 	}
-	if v, _ := st.lookup(cacheKey(testURL), ""); !closeTo(v.ttl, 5*time.Minute+time.Hour) {
+	if v, _ := st.lookup(cacheKey(testURL), ""); !closeTo(v.ttl, 5*time.Minute) {
 		t.Errorf("ttl = %v", v.ttl)
 	}
 }

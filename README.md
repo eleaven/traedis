@@ -80,7 +80,7 @@ All keys but `redis.dsn` are optional. Durations use the [Go syntax](https://pkg
 | `redis.retryAfter`             | `1s`                   | How often Redis is tried again once it is no longer asked.                                                                                     |
 | `statusCodes`                  | `["200-399"]`          | Codes (`404`) and ranges (`400-499`) that may be stored. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable. |
 | `defaultTtl`                   | `0`                    | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires` (`5m`). `0`: not stored. See [Security](#security).                     |
-| `staleTtl`                     | `1h`                   | How long an entry is kept in Redis after it expires: the upper bound of every [stale response](#stale-responses). `0` disables them.           |
+| `staleTtl`                     | `1h`                   | How long an expired entry stays in Redis while it may be [validated](#conditional-requests) or [served stale](#stale-responses), at most.      |
 | `defaultStaleWhileRevalidate`  | `0`                    | `stale-while-revalidate` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                              |
 | `defaultStaleIfError`          | `0`                    | `stale-if-error` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                                      |
 | `maxBodyBytes`                 | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached. At most 512 MiB, the largest value Redis takes.                                    |
@@ -295,6 +295,10 @@ For backends that don't send these directives, `defaultStaleWhileRevalidate` and
 turns it off), and the rules above still apply. With `defaultStaleWhileRevalidate`, clients can get a response older than what the backend
 asked for: on a URL that is rarely requested, by up to the whole window.
 
+An expired response is only kept in Redis while it may still be used. With an `ETag` or a `Last-Modified`, which let the cache
+[validate](#conditional-requests) it, or with `followClientCacheControl: true`, for `max-stale`, it is kept for `staleTtl`. Otherwise, it is
+kept for the longest of its `stale-while-revalidate` and `stale-if-error` windows, if it has one, and removed as soon as it expires if not.
+
 ### Invalidation by unsafe methods
 
 When the backend answers a request with an unsafe method (any method that is not `GET`, `HEAD`, `OPTIONS` or `TRACE`) with a `2xx` or a
@@ -381,11 +385,12 @@ A shared cache gives the response made for one client to all the others. The def
   ``Host(`app.example.com`) && (Method(`GET`) || Method(`HEAD`))``. Safe methods remove nothing, but for a `404` or a `410` that the
   [background refresh](#stale-responses) of a stale response gets.
 - **Cache pollution and cache flooding.** Each URL has its own entry, and the cache cannot know which query parameters the backend ignores:
-  `?x=1`, `?x=2`… store the same response again and again, each one up to `maxBodyBytes` and for its freshness plus `staleTtl`. Nothing
-  bounds the number of URLs: a client can fill Redis with entries that nobody asks for again (flooding), which then take the place of the
-  useful ones (pollution). Give Redis a `maxmemory` with the `allkeys-lfu` policy, so that entries requested once are evicted first, and
-  have the backend refuse the URLs it does not know: with the default `statusCodes`, no error is stored. A redirection is, with
-  `s-maxage`, `max-age` or `Expires`, and a `301` or a `308` even without them when a `defaultTtl` is set.
+  `?x=1`, `?x=2`… store the same response again and again, each one up to `maxBodyBytes` and for its freshness plus, at most, `staleTtl`
+  (see [Stale responses](#stale-responses)). Nothing bounds the number of URLs: a client can fill Redis with entries that nobody asks for
+  again (flooding), which then take the place of the useful ones (pollution). Give Redis a `maxmemory` with the `allkeys-lfu` policy, so
+  that entries requested once are evicted first, and have the backend refuse the URLs it does not know: with the default `statusCodes`, no
+  error is stored. A redirection is, with `s-maxage`, `max-age` or `Expires`, and a `301` or a `308` even without them when a `defaultTtl`
+  is set.
 - **Redirections are shared too.** A backend that sends the same `Cache-Control: public, max-age=…` on all its responses has its
   redirection of anonymous clients to its login page stored, then served to the clients that are logged in. Have it send `private` or
   `no-store` with what depends on the client, redirections included, or leave `3xx` out of `statusCodes` (`["200-299"]`).

@@ -5,7 +5,7 @@ What each release changes for those who use the plugin, the latest first. The se
 
 ## v0.4.0
 
-Safer defaults: see the breaking changes before upgrading.
+Safer defaults and less memory in Redis: see the breaking changes before upgrading.
 
 ### ⚠️ Breaking changes
 
@@ -14,6 +14,11 @@ Safer defaults: see the breaking changes before upgrading.
 - **`redis.dsn` is required**: it no longer defaults to `redis://cache:6379/0`.
 - **`ignoreClientCacheControl` is renamed `followClientCacheControl`**, with the opposite value: replace `ignoreClientCacheControl: false`
   with `followClientCacheControl: true`. The old key is silently ignored.
+
+### Features
+
+- **[Expired responses are only kept while they may be used](https://github.com/eleaven/traedis/blob/v0.4.0/README.md#stale-responses)**:
+  for `staleTtl` with an `ETag` or a `Last-Modified`, otherwise for their stale windows, if any.
 
 ## v0.3.1
 

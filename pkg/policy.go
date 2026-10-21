@@ -356,7 +356,21 @@ func storeTTL(req *http.Request, reqCC cacheControl, e *entry, cc cacheControl, 
 	if remaining <= 0 {
 		return 0, false
 	}
-	return remaining + cfg.staleTTL, true
+	return remaining + keptStale(e, cc, cfg), true
+}
+
+// keptStale returns how long e is kept in Redis once it is stale: as long as it may still be used, at most staleTtl. With a validator, it
+// may be validated instead of sent again (§4.3.1); a request with max-stale may get it (§5.2.1.2); the windows of RFC 5861 may serve it.
+// Otherwise nothing reads it before the response that replaces it is stored.
+func keptStale(e *entry, cc cacheControl, cfg settings) time.Duration {
+	if cfg.followClientCacheControl || e.header.Get("ETag") != "" || e.header.Get("Last-Modified") != "" {
+		return cfg.staleTTL
+	}
+	kept := staleWindow(cc, cc.staleWhileRevalidate, cfg.defaultStaleWhileRevalidate, cfg.staleTTL)
+	if window := staleWindow(cc, cc.staleIfError, cfg.defaultStaleIfError, cfg.staleTTL); window > kept {
+		kept = window
+	}
+	return kept
 }
 
 // hasAuthorization reports whether the request header h has one of the authorizationHeaders, with a value on any of its lines.
@@ -395,8 +409,15 @@ func servable(reqCC cacheControl, age, lifetime time.Duration) bool {
 // be permitted by configuration). Either way the window is capped at staleTtl. staleness is negative while the response is fresh. No
 // directive of the response may forbid serving stale (§4.2.4); s-maxage implies proxy-revalidate (§5.2.2.10).
 func staleAllowed(cc cacheControl, directive int64, fallback, staleness, staleTTL time.Duration) bool {
+	window := staleWindow(cc, directive, fallback, staleTTL)
+	return window > 0 && staleness < window
+}
+
+// staleWindow returns how long past its freshness lifetime a stored response may be served under an RFC 5861 directive, or under the
+// configured fallback when it does not carry it (see staleAllowed).
+func staleWindow(cc cacheControl, directive int64, fallback, staleTTL time.Duration) time.Duration {
 	if cc.noCache || cc.mustRevalidate || cc.proxyRevalidate || cc.sMaxAge >= 0 {
-		return false
+		return 0
 	}
 	window := fallback
 	if directive >= 0 {
@@ -405,7 +426,7 @@ func staleAllowed(cc cacheControl, directive int64, fallback, staleness, staleTT
 	if window > staleTTL {
 		window = staleTTL
 	}
-	return window > 0 && staleness < window
+	return window
 }
 
 // servableWhileRevalidating reports whether a stale response may be served while it is revalidated in the background (RFC 5861 §3). A
