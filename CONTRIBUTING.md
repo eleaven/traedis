@@ -6,18 +6,12 @@ Requires Docker (with Compose), Go ≥ 1.22 and the [Yaegi](https://github.com/t
 ## Project structure
 
 ```text
-pkg/               # the plugin (package `traedis`): one concern per file, with its `_test.go` next to it
-  middleware.go    #   the entry point: `New()` and the handler
-  policy.go        #   what may be stored and served
-  redis.go         #   the Redis client: RESP and connection pool
-example/           # Traefik configuration of the local stack: one dynamic file per sample backend
+pkg/               # the plugin (package `traedis`): one concern per file, with its `_test.go` next to it; entrypoint is in `middleware.go`
+example/           # Traefik configuration of the local stack
 e2e/               # end-to-end tests: Hurl files requesting Traefik
 benchmark/         # benchmarks under Yaegi, k6 load test
-.github/scripts/   # scripts of the CI: version and release notes, job summaries
 compose.yml        # local stack: Traefik, Redis, sample backends (whoami, placeholder, imgproxy), Redis Insight
 .traefik.yml       # plugin manifest of the Traefik Plugin Catalog
-VERSION            # the version to release
-CHANGELOG.md       # what each version changes: the text of its GitHub release
 ```
 
 ## Commands
@@ -25,12 +19,9 @@ CHANGELOG.md       # what each version changes: the text of its GitHub release
 ```bash
 make start       # start the local stack; Traefik restarts whenever the plugin code changes
 make stop        # stop the stack (`make reset` also removes the volumes)
-make test        # all the tests the CI requires: `make unit`, then `make e2e`
-make unit        # gofmt, go vet, go test -race, then the same tests under Yaegi, with a Redis for the integration tests
+make test        # all the tests the CI requires: `make unit` (Go, then Yaegi), then `make e2e` (through Traefik)
 make fuzz        # each fuzzer of pkg/fuzz_test.go for 30 s (FUZZTIME=5m for longer)
-make e2e         # end-to-end tests, through Traefik
-make bench       # benchmarks → benchmark/results.json (the CI shows them in the summary of its run)
-make help        # list all targets
+make help        # all the other targets, such as `make bench`
 ```
 
 ## Rules
@@ -43,11 +34,12 @@ make help        # list all targets
 - **Never break a response.** Nothing is buffered past `maxBodyBytes`, and streaming (`Flush`), WebSockets (`Hijack`) and trailers keep
   working.
 - **Clients are not trusted, neither is what Redis returns.** Clients must not be able to multiply entries without bound, nor to evict
-  stored ones other than by [invalidation](README.md#invalidation-by-unsafe-methods), and nothing is allocated from a length that was not checked.
+  stored ones other than by [invalidation](SPEC.md#invalidation-by-unsafe-methods), and nothing is allocated from a length that was not checked.
 - **Stored formats are stable.** Changing the Redis key invalidates the whole cache; changing the encoding of an entry or of a `Vary` marker
   bumps its version prefix.
-- **The README is the specification.** A change of behaviour updates its "Caching rules" or "Security" section. An option is declared in
-  `pkg/config.go`, in the README table and in the `testData` of `.traefik.yml`.
+- **[`SPEC.md`](SPEC.md) is the specification**, with the configuration and HTTP headers of the README. A change of behaviour updates it,
+  and the summary of the README when it no longer holds. An option is declared in `pkg/config.go`, in the README table and in the
+  `testData` of `.traefik.yml`.
 - **What parses untrusted data has a fuzzer** in `pkg/fuzz_test.go`. An input that `make fuzz` finds is committed with its fix, in
   `pkg/testdata/fuzz`: it then runs with the tests. One that the CI finds is in the `fuzz-testdata` artifact of its `fuzz` job.
 - **Every bug fix comes with a regression test**, and what is visible through Traefik with an end-to-end one. The files of `e2e/tests/` run

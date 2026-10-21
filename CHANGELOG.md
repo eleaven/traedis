@@ -17,8 +17,13 @@ Safer defaults and less memory in Redis: see the breaking changes before upgradi
 
 ### Features
 
-- **[Expired responses are only kept while they may be used](https://github.com/eleaven/traedis/blob/v0.4.0/README.md#stale-responses)**:
+- **[Expired responses are only kept while they may be used](https://github.com/eleaven/traedis/blob/v0.4.0/SPEC.md#stale-responses)**:
   for `staleTtl` with an `ETag` or a `Last-Modified`, otherwise for their stale windows, if any.
+
+### Documentation
+
+- **A shorter README**, with a security checklist and tables for the HTTP headers. The caching rules and the details of security move to
+  [`SPEC.md`](https://github.com/eleaven/traedis/blob/v0.4.0/SPEC.md).
 
 ## v0.3.1 – 2026-10-19
 

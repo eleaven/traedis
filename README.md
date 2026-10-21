@@ -6,13 +6,15 @@
      either (`> [!NOTE]`), which it shows as they are written -->
 <!--suppress HtmlDeprecatedAttribute -->
 <p align="center">
-  <img src="https://raw.githubusercontent.com/eleaven/traedis/main/assets/icon.svg" alt="Traedis Logo" height="360">
+  <img src="https://raw.githubusercontent.com/eleaven/traedis/main/assets/icon.svg" alt="Traedis Logo" height="290">
 </p>
 
 # Traedis
 
 [![Release](https://img.shields.io/github/v/release/eleaven/traedis)][releases]
 [![CI](https://img.shields.io/github/actions/workflow/status/eleaven/traedis/ci.yml?branch=main&label=CI)][ci]
+[![Traefik Plugin Catalog](https://img.shields.io/badge/Traefik_Plugin_Catalog-v3-24A1C1?logo=traefikproxy&logoColor=white)][catalog]
+[![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)][gomod]
 
 **Redis**-backed HTTP cache for **Traefik**, shipped as a **middleware plugin**.
 
@@ -21,11 +23,10 @@
 - **Dependency-free**: only uses the Go standard library, with no third-party module and no `unsafe`.
 - **Safe by default**: never caches what must not be shared (`Authorization`, `Set-Cookie`, `private`) unless the backend explicitly allows
   it. See [Security](#security) for the pitfalls.
-- **Fail open**: if Redis is slow or down, requests go straight to the backend, and Traefik still starts. See
-  [Redis failures](#redis-failures).
+- **Fail open**: if Redis is slow or down, requests are forwarded to the backend, and Traefik still starts.
 - **Observable**: every response tells what the cache did in a [`Cache-Status`](#added-by-traedis) header.
 - **Stream-friendly**: large bodies, WebSockets and server-sent events pass through untouched.
-- **Persistent and shared**: responses are stored in Redis, not in Traefik's memory: the cache survives restarts and redeploys, and all
+- **Persistent and shared**: responses are cached in Redis, not in Traefik's memory. The cache survives restarts and redeploys, and all
   Traefik replicas share it.
 
 ## Installation
@@ -61,359 +62,184 @@ http:
         - cache
 ```
 
-Authentication and rate limiting go before the cache: see [Security](#security). A complete local setup (Traefik, Redis, sample backends) is
-available in [`compose.yml`][compose] and [`example/`][example].
+Put authentication and rate limiting before the cache (see [Security](#security)). [`compose.yml`][compose] and [`example/`][example]
+provide a complete local setup, with Traefik, Redis and sample backends.
 
 ## Configuration
 
 All keys but `redis.dsn` are optional. Durations use the [Go syntax](https://pkg.go.dev/time#ParseDuration) (`50ms`, `5m`, `1h`).
 
-| Key                            | Default                | Description                                                                                                                                    |
-|--------------------------------|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| `redis.dsn`                    | required               | `redis://[user[:password]@]host[:port][/db]`, or `rediss://` for TLS: the certificate of Redis is then verified.                               |
-| `redis.tls.ca`                 | system authorities     | With `rediss://`, the authorities that may have signed the certificate of Redis: a PEM file, or its content.                                   |
-| `redis.tls.insecureSkipVerify` | `false`                | With `rediss://`, accept any certificate: the connection is encrypted, but Redis may be anyone.                                                |
-| `redis.poolSize`               | `10`                   | Connections to Redis, at most, for each middleware in each Traefik instance. A request that finds them all busy waits for one.                 |
-| `redis.dialTimeout`            | `50ms`                 | Maximum time to get a connection to Redis: a free one of the pool, or a new one. Past it, the cache is bypassed.                               |
-| `redis.timeout`                | `1s`                   | Maximum time for a whole Redis operation, getting the connection and transferring a body included. Past it, the cache is bypassed.             |
-| `redis.maxFailures`            | `5`                    | Failures in a row after which Redis is [no longer asked](#redis-failures). `0`: every request tries it.                                        |
-| `redis.retryAfter`             | `1s`                   | How often Redis is tried again once it is no longer asked.                                                                                     |
-| `statusCodes`                  | `["200-399"]`          | Codes (`404`) and ranges (`400-499`) that may be stored. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable. |
-| `defaultTtl`                   | `0`                    | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires` (`5m`). `0`: not stored. See [Security](#security).                     |
-| `staleTtl`                     | `1h`                   | How long an expired entry stays in Redis while it may be [validated](#conditional-requests) or [served stale](#stale-responses), at most.      |
-| `defaultStaleWhileRevalidate`  | `0`                    | `stale-while-revalidate` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                              |
-| `defaultStaleIfError`          | `0`                    | `stale-if-error` window for responses that don't send the directive, at most `staleTtl`. `0` disables it.                                      |
-| `maxBodyBytes`                 | `5242880` (5 MiB)      | Larger responses are streamed to the client and not cached. At most 512 MiB, the largest value Redis takes.                                    |
-| `maxBufferedBytes`             | `67108864` (64 MiB)    | [Bodies held in memory](#security) at once, in each Traefik instance: past it, the cache is bypassed. At least `maxBodyBytes`.                 |
-| `maxVariants`                  | `16`                   | Stored [variants](#variants) per URL. `0`: responses with `Vary` are not cached.                                                               |
-| `maxRevalidations`             | `10`                   | [Background refreshes](#stale-responses) running at once, for each middleware in each Traefik instance.                                        |
-| `revalidationTimeout`          | `30s`                  | Maximum time of a background refresh.                                                                                                          |
-| `sortQuery`                    | `false`                | Sort the query parameters by name in the cache key: `?a=1&b=2` and `?b=2&a=1` share the same entry. Only for backends that ignore their order. |
-| `authorizationHeaders`         | `[]`                   | Request header fields that tell who the client is, as `Authorization` does (`X-WebAuth-User`): see [Security](#security).                      |
-| `followClientCacheControl`     | `false`                | Follow the `Cache-Control` of requests, whose directives are advisory: see [Sent by the client](#sent-by-the-client).                          |
-| `exposeCacheStatus`            | `true`                 | Add the [`Cache-Status`](#added-by-traedis) header to the responses: what the cache did. See [Security](#security).                            |
-| `exposeKey`                    | `false`                | Add the [Redis key](#cacheable-responses) to the `Cache-Status` header (`key="…"`). Requires `exposeCacheStatus`.                              |
+| Key                            | Default             | Description                                                                                                                                               |
+|--------------------------------|---------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `redis.dsn`                    | required            | `redis://[user[:password]@]host[:port][/db]`, or `rediss://` for TLS, which verifies Redis's certificate.                                                 |
+| `redis.tls.ca`                 | system authorities  | With `rediss://`, the authorities trusted to sign Redis's certificate, as a PEM file or its content.                                                      |
+| `redis.tls.insecureSkipVerify` | `false`             | With `rediss://`, accept any certificate. The connection is encrypted, but Redis may be anyone.                                                           |
+| `redis.poolSize`               | `10`                | Maximum connections to Redis, per middleware and per Traefik instance. A request that finds them all busy waits for one.                                  |
+| `redis.dialTimeout`            | `50ms`              | Maximum time to get a Redis connection, free in the pool or new. Past it, the request is forwarded without the cache.                                     |
+| `redis.timeout`                | `1s`                | Maximum time for a whole Redis operation, including getting the connection and transferring a body. Past it, the request is forwarded without the cache.  |
+| `redis.maxFailures`            | `5`                 | Consecutive failures after which Redis is [no longer asked][spec-redis]. `0`: every request tries it.                                                     |
+| `redis.retryAfter`             | `1s`                | How often Redis is tried again once it is no longer asked.                                                                                                |
+| `statusCodes`                  | `["200-399"]`       | Codes (`404`) and ranges (`400-499`) that may be cached. It only narrows what [RFC 9111][rfc9111] allows; it never makes a response cacheable.            |
+| `defaultTtl`                   | `0`                 | Freshness when the backend sends no `max-age`, `s-maxage` or `Expires` (`5m`). `0`: not cached. Read [Security](#security) first.                         |
+| `staleTtl`                     | `1h`                | How long, at most, an expired response stays in Redis to be [validated][spec-conditional] or [served stale][spec-stale].                                  |
+| `defaultStaleWhileRevalidate`  | `0`                 | `stale-while-revalidate` window for responses without the directive, at most `staleTtl`. `0` disables it.                                                 |
+| `defaultStaleIfError`          | `0`                 | `stale-if-error` window for responses without the directive, at most `staleTtl`. `0` disables it.                                                         |
+| `maxBodyBytes`                 | `5242880` (5 MiB)   | Larger responses are streamed to the client and not cached. At most 512 MiB, the largest value Redis accepts.                                             |
+| `maxBufferedBytes`             | `67108864` (64 MiB) | Total size of the [bodies held in memory][spec-abuse] per Traefik instance. Past it, requests are forwarded without the cache. At least `maxBodyBytes`.   |
+| `maxVariants`                  | `16`                | Maximum cached [variants][spec-variants] per URL. `0`: responses with `Vary` are not cached.                                                              |
+| `maxRevalidations`             | `10`                | Maximum [background refreshes][spec-stale] running at once, per middleware and per Traefik instance.                                                      |
+| `revalidationTimeout`          | `30s`               | Maximum duration of a background refresh.                                                                                                                 |
+| `sortQuery`                    | `false`             | Sort the query parameters by name in the cache key, so that `?a=1&b=2` and `?b=2&a=1` share a cached response. Only for backends that ignore their order. |
+| `authorizationHeaders`         | `[]`                | Request headers that identify the client, as `Authorization` does (`X-WebAuth-User`). Requests with one are treated like those with `Authorization`.      |
+| `followClientCacheControl`     | `false`             | Follow the request's `Cache-Control`, whose directives are advisory. See [Sent by the client](#sent-by-the-client).                                       |
+| `exposeCacheStatus`            | `true`              | Add the [`Cache-Status`](#added-by-traedis) header to responses, to tell what the cache did.                                                              |
+| `exposeKey`                    | `false`             | Add the [Redis key][spec-cacheable] to `Cache-Status` (`key="…"`). Requires `exposeCacheStatus`.                                                          |
 
 ## HTTP headers
 
-Traedis is driven by the standard HTTP header fields sent by the backend, the client or added by Traedis itself.
+Traedis follows the standard HTTP headers sent by the backend and the client, and adds a few of its own.
 
 ### Sent by the backend
 
-The response of the backend says whether it may be stored, for how long, and whether it may be served stale.
+The backend's response says whether it may be cached, for how long, and whether it may be served stale.
 
-- `Cache-Control`, a list of directives separated by commas (`max-age=60, stale-if-error=300`):
-  - `max-age=N`: fresh for `N` seconds.
-  - `s-maxage=N`: the same, and it wins over `max-age`. Never served [stale](#stale-responses).
-  - `no-store`, `private`, `no-cache`: do not store the response.
-  - `private="Set-Cookie"`, `no-cache="Set-Cookie"`: stored without the header fields they name, which only the client that caused the
-    miss gets.
-  - `public`: stored even when the request has `Authorization`.
-  - `must-revalidate`, `proxy-revalidate`: never served stale.
-  - `stale-while-revalidate=N`: once stale, still served for `N` seconds, and refreshed in the background.
-  - `stale-if-error=N`: once stale, still served for `N` seconds in place of an error of the backend.
-- `Expires`: until when it is fresh, without `max-age` nor `s-maxage`. Without any of the three, the response is not stored, unless a
-  `defaultTtl` is set: it then applies, but not when the exchange has `Authorization`, `Cookie` or `Set-Cookie`.
-- `Age`, `Date`: how old the response already is. It is stored for the freshness it has left.
-- `Vary`: one stored [variant](#variants) per value of the request header fields it names. Not stored with `*`, `Cookie` or
-  `Authorization` (one variant per user).
-- `ETag`, `Last-Modified`: let the cache [validate](#conditional-requests) a stale response instead of getting it
-  again, and answer `304` to the clients that already have it.
-- `Set-Cookie`: not stored, even `public`, unless `private="Set-Cookie"` or `no-cache="Set-Cookie"` keeps the cookie out.
+| `Cache-Control` directive                       | Effect                                                                                |
+|-------------------------------------------------|---------------------------------------------------------------------------------------|
+| `max-age=N`                                     | Fresh for `N` seconds.                                                                |
+| `s-maxage=N`                                    | Same, and wins over `max-age`. Never served [stale][spec-stale].                      |
+| `no-store`, `private`, `no-cache`               | Not cached.                                                                           |
+| `private="Set-Cookie"`, `no-cache="Set-Cookie"` | Cached without the headers they name. Only the client that caused the miss gets them. |
+| `public`                                        | Cached even when the request has `Authorization`.                                     |
+| `must-revalidate`, `proxy-revalidate`           | Never served stale.                                                                   |
+| `stale-while-revalidate=N`                      | Once stale, still served for `N` seconds, and refreshed in the background.            |
+| `stale-if-error=N`                              | Once stale, still served for `N` seconds instead of a backend error.                  |
+
+| Header                  | Effect                                                                                                                                                  |
+|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Expires`               | Fresh until this date, when there is no `max-age` or `s-maxage`. Without any of the three, the response is not cached, unless `defaultTtl` is set.      |
+| `Age`, `Date`           | How old the response already is. It is cached for the freshness it has left.                                                                            |
+| `Vary`                  | One cached [variant][spec-variants] per value of the request headers it names. Not cached with `*`, `Cookie` or `Authorization` (one variant per user). |
+| `ETag`, `Last-Modified` | Let the cache [validate][spec-conditional] a stale response instead of fetching it again, and answer `304` to clients that already have it.             |
+| `Set-Cookie`            | Not cached, even with `public`, unless `private="Set-Cookie"` or `no-cache="Set-Cookie"` keeps the cookie out.                                          |
 
 ### Sent by the client
 
-The request of the client says whether a stored response may answer it.
+The client's request says whether a cached response may answer it.
 
-- `Cache-Control`: ignored by default (`followClientCacheControl`). Its directives are advisory
-  ([RFC 9111 §5.2.1](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1)): followed, they let any client replace the stored response
-  with what the backend answers to its own request, get a stale one, and tell whether a URL is stored without storing it (see
-  [Security](#security)). With `followClientCacheControl: true`:
-  - `no-cache`: always forwarded, whatever is stored. The response is stored.
-  - `no-store`: the response is not stored. A stored one can still answer.
-  - `max-age=N`: refuses a stored response older than `N` seconds.
-  - `min-fresh=N`: refuses a stored response that is not fresh for `N` more seconds.
-  - `max-stale=N`: accepts a response that is stale by less than `N` seconds; `max-stale` alone, by any time.
-  - `only-if-cached`: never forwarded. When nothing stored can answer, it gets a `504` without `Cache-Status`. With `max-stale`, it is what
-    an offline client sends.
-- `If-None-Match`, `If-Modified-Since`: answered with a `304` when the stored response is the one the client
-  [already has](#conditional-requests).
-- `Range`, `If-Range`: answered with the bytes asked for of the stored response ([range requests](#range-requests)).
-- `Authorization`, and the header fields of `authorizationHeaders`: the response is not stored, unless the backend allows sharing it with
-  `public`, `s-maxage` or `must-revalidate`.
-- `Cookie`: not part of the cache key, see [Security](#security).
-- `Accept-Encoding`, and the header fields that `Vary` names: choose the [variant](#variants).
-- `Upgrade`, `Accept: text/event-stream`: forwarded untouched (WebSockets, server-sent events).
-- `Content-Length`, `Transfer-Encoding`: a `GET` or `HEAD` with content is forwarded untouched, and its response is not stored. Some
-  backends read parameters in it, which the cache key does not have.
+Its `Cache-Control` is ignored by default. Its directives are advisory
+([RFC 9111 §5.2.1](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1)), and following them lets any client replace the cached response
+with what the backend answers to its own request, get a stale one, and tell whether a URL is cached without caching it. With
+`followClientCacheControl: true`:
+
+| `Cache-Control` directive | Effect                                                                                                                                                 |
+|---------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `no-cache`                | Always forwarded, whatever is cached. The response is cached.                                                                                          |
+| `no-store`                | The response is not cached. A cached one can still answer.                                                                                             |
+| `max-age=N`               | Refuses a cached response older than `N` seconds.                                                                                                      |
+| `min-fresh=N`             | Refuses a cached response that will not be fresh for `N` more seconds.                                                                                 |
+| `max-stale=N`             | Accepts a response that is stale by less than `N` seconds. `max-stale` alone accepts any staleness.                                                    |
+| `only-if-cached`          | Never forwarded. When nothing cached can answer, the client gets a `504` without `Cache-Status`. With `max-stale`, it is what an offline client sends. |
+
+| Header                                                     | Effect                                                                                                                                                              |
+|------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `If-None-Match`, `If-Modified-Since`                       | Answered with a `304` when the client [already has][spec-conditional] the cached response.                                                                          |
+| `Range`, `If-Range`                                        | Answered with the requested bytes of the cached response ([range requests][spec-range]).                                                                            |
+| `Authorization`, and the headers of `authorizationHeaders` | The response is not cached, unless the backend allows sharing it with `public`, `s-maxage` or `must-revalidate`.                                                    |
+| `Cookie`                                                   | Not part of the cache key: a cookie does not make a response private.                                                                                               |
+| `Accept-Encoding`, and the headers that `Vary` names       | Select the [variant][spec-variants].                                                                                                                                |
+| `Upgrade`, `Accept: text/event-stream`                     | Forwarded untouched (WebSockets, server-sent events).                                                                                                               |
+| `Content-Length`, `Transfer-Encoding`                      | A `GET` or `HEAD` with a body is forwarded untouched, and its response is not cached. Some backends read parameters in the body, which the cache key does not have. |
 
 ### Added by Traedis
 
-Traedis adds these to the responses it sends to the client, and to the requests it sends to the backend.
+| Header                               | Effect                                                                                              |
+|--------------------------------------|-----------------------------------------------------------------------------------------------------|
+| `Age`                                | On a response served from the cache, the seconds since the backend made it.                         |
+| `If-None-Match`, `If-Modified-Since` | Sent to the backend instead of the client's, to [validate][spec-conditional] a cached response.     |
+| `Cache-Status`                       | On every response, what the cache did ([RFC 9211][rfc9211]), unless `exposeCacheStatus` is `false`. |
 
-- `Age`: on a response served from the cache, the seconds since the backend made it.
-- `If-None-Match`, `If-Modified-Since`: sent to the backend in place of those of the client, to
-  [validate](#conditional-requests) a stored response.
-- `Cache-Status: traedis; …`: on every response, what the cache did ([RFC 9211][rfc9211]), unless `exposeCacheStatus` is `false`:
-  - `hit; ttl=N`: served from the cache, fresh for `N` more seconds.
-  - `hit; ttl=-N; detail=stale-while-revalidate`: served from the cache, stale by `N` seconds, and refreshed in the background.
-  - `hit; ttl=-N; detail=max-stale`: served from the cache, stale by `N` seconds, as the request allows (`followClientCacheControl: true`).
-  - `fwd=uri-miss`: forwarded, nothing is stored for this URL.
-  - `fwd=vary-miss`: forwarded, this URL has [variants](#variants), but none for this request.
-  - `fwd=stale`: forwarded, the stored response is stale.
-  - `fwd=request`: forwarded, the request says `no-cache`, or its `max-age` or `min-fresh` refuses a stored response that is still fresh
-    (`followClientCacheControl: true`).
-  - `fwd=stale; fwd-status=304; ttl=N`: [validated](#conditional-requests) by the backend, the stored response is
-    served, fresh for `N` seconds again.
-  - `fwd=stale; fwd-status=503; ttl=-N; detail=stale-if-error`: the backend failed, the stored response is served in place of its error.
-  - `fwd=bypass`: forwarded untouched, WebSocket upgrade, server-sent events or request with content.
-  - `fwd=bypass; detail=redis`: forwarded, Redis [failed, timed out or is no longer asked](#redis-failures).
-  - `fwd=bypass; detail=memory`: forwarded, the bodies held in memory reach `maxBufferedBytes`: the stored response is not sent from the
-    cache (see [Security](#security)).
-  - `fwd=method`: forwarded, `OPTIONS`, `TRACE` or an unsafe method.
-  - `fwd=method; detail=invalidated`: unsafe method, the stored responses of the URL were [removed](#invalidation-by-unsafe-methods)
-    (`detail=redis`: Redis could not be reached).
-  - `fwd-status=N`: the status the backend answered with, whatever the client gets.
-  - `key="…"`: the [Redis key](#cacheable-responses), enabled by the `exposeKey` option, to help debug the cache.
+`Cache-Status` reads `traedis;` followed by one of these values:
+
+| Value                                                      | Meaning                                                                                                                                                  |
+|------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `hit; ttl=N`                                               | Served from the cache, fresh for `N` more seconds.                                                                                                       |
+| `hit; ttl=-N; detail=stale-while-revalidate`               | Served from the cache, stale by `N` seconds, and refreshed in the background.                                                                            |
+| `hit; ttl=-N; detail=max-stale`                            | Served from the cache, stale by `N` seconds, as the request allows (`followClientCacheControl: true`).                                                   |
+| `fwd=uri-miss`                                             | Forwarded: nothing is cached for this URL.                                                                                                               |
+| `fwd=vary-miss`                                            | Forwarded: this URL has [variants][spec-variants], but none for this request.                                                                            |
+| `fwd=stale`                                                | Forwarded: the cached response is stale.                                                                                                                 |
+| `fwd=request`                                              | Forwarded: the request has `no-cache`, or its `max-age` or `min-fresh` refuses a cached response that is still fresh (`followClientCacheControl: true`). |
+| `fwd=stale; fwd-status=304; ttl=N`                         | [Validated][spec-conditional] by the backend: the cached response is served, fresh again for `N` seconds.                                                |
+| `fwd=stale; fwd-status=503; ttl=-N; detail=stale-if-error` | The backend failed: the cached response is served instead of its error.                                                                                  |
+| `fwd=bypass`                                               | Forwarded untouched: WebSocket upgrade, server-sent events or request with a body.                                                                       |
+| `fwd=bypass; detail=redis`                                 | Forwarded: Redis [failed, timed out or is no longer asked][spec-redis].                                                                                  |
+| `fwd=bypass; detail=memory`                                | Forwarded: the [bodies held in memory][spec-abuse] reach `maxBufferedBytes`, so the cached response is not sent.                                         |
+| `fwd=method`                                               | Forwarded: `OPTIONS`, `TRACE` or an unsafe method.                                                                                                       |
+| `fwd=method; detail=invalidated`                           | Unsafe method: the URL's cached responses were [removed][spec-invalidation] (`detail=redis` when Redis could not be reached).                            |
+
+Two parameters can come with them:
+
+| Parameter      | Meaning                                                                           |
+|----------------|-----------------------------------------------------------------------------------|
+| `fwd-status=N` | The status the backend answered with, whatever the client gets.                   |
+| `key="…"`      | The [Redis key][spec-cacheable], with `exposeKey: true`, to help debug the cache. |
 
 ## Caching rules
 
-### Cacheable responses
+The [specification][spec] details each rule. In short:
 
-Responses are stored by middleware and by URL (scheme, host with its case, path and query), and only when all of the following hold:
-
-- the request is a `GET` (a `HEAD` is answered from the stored `GET`);
-- its status is listed in `statusCodes`;
-- it is fresh, through `s-maxage`, `max-age`, `Expires` or, when it is set, `defaultTtl`;
-- no [header field](#http-headers) of the request or of the response forbids it;
-- it is not a redirection to its own URL (its default port and the case of its host aside), which would send every client back to it in a
-  loop (see [Security](#security));
-- it is complete (a response that the backend cuts short is not stored) and fits in `maxBodyBytes`, and in `maxBufferedBytes` along with
-  the other bodies held in memory (see [Security](#security)).
-
-A response is stored once it is sent: its client never waits for Redis. The next request for the same URL does, for no longer than
-`redis.dialTimeout`, so that a miss is followed by a hit. No more responses are being stored at a time than `redis.poolSize`, and one per
-URL: past that, a response is not stored, and the next one for its URL is.
-
-`OPTIONS`, `TRACE`, WebSocket upgrades, `Accept: text/event-stream` requests and requests with content are forwarded as is. So are
-unsafe methods (`POST`, `PUT`, `DELETE`…), which [invalidate](#invalidation-by-unsafe-methods) what is stored.
-
-The Redis key is `traedis:<middleware>:<hash of the URL>`, with the name Traefik gives the middleware (`cache@file`). The routers that use
-the same middleware share its stored responses (see [Security](#security)), in all the Traefik instances; two middlewares never do, even in
-the same Redis database and for the same URL: renaming a middleware starts it with an empty cache.
-
-### Variants
-
-With `Vary`, the cache stores one variant per value of the request headers it names
-([RFC 9111 §4.1][rfc9111-4.1]): with `Vary: Accept-Language`, `fr` and `en` requests each get their own stored response.
-
-- The backend decides: there is no option to add or ignore a header, and the `Vary` sent to clients is never rewritten.
-- Values are compared as they are, apart from surrounding spaces and repeated header lines: `fr-FR` and `fr-fr` are two variants, and a
-  request without the header has its own.
-- At most `maxVariants` variants are stored per URL: further ones are forwarded and not stored. Stored ones are never evicted to make room,
-  not even when `maxVariants` is lowered. Clients choose these values: the worst case for one URL is `maxVariants` × `maxBodyBytes` in
-  Redis.
-
-`Accept-Encoding` is the exception, because clients spell it in many ways (`gzip, br`, `br;q=1.0, gzip;q=0.8`…). The request reaches the
-backend untouched, and its response is stored by `Content-Encoding` (`zstd`, `br`, `gzip`, `deflate` or none), then served to every request
-that accepts that coding.
-
-- A request never gets a coding it does not accept (`q=0` and `*` are honoured; without `Accept-Encoding`, only an uncompressed response),
-  and clients cannot create variants by changing their `Accept-Encoding`.
-- Among the stored codings a request accepts, the first of `zstd`, `br`, `gzip`, `deflate` is served, whatever its other weights: a browser
-  gets the stored `gzip` variant until it is stale, even from a backend that would have sent it `br`.
-- An uncompressed response is only served to requests accepting no more codings than the request it was stored for: a `curl` without
-  `Accept-Encoding` cannot make browsers get it.
-- A response with `Vary: Accept-Encoding` and another `Content-Encoding`, or several, is not cached.
-
-> **Note:** Traefik's `compress` middleware only adds `Vary: Accept-Encoding` to the responses it compresses: placed after the cache, its
-> uncompressed response has no `Vary` and is served to everyone. Put `compress` before the cache, or set `Vary: Accept-Encoding` on every
-> response with a `headers` middleware, as [`example/dynamic/whoami.yml`][whoami] does.
-
-### Conditional requests
-
-The cache plays both parts of `If-None-Match`, `If-Modified-Since` and `304 Not Modified` ([RFC 9111 §4.3][rfc9111-4.3]).
-
-**Towards its clients**, it answers `304` from a stored response whose `ETag` is one of `If-None-Match` (weak comparison), or that was not
-modified since `If-Modified-Since` (its `Last-Modified`, otherwise its `Date`). With nothing stored, the request reaches the backend as it
-is and its `304` goes to the client, without being stored: a URL is cached once a client asks for it without having it already. `If-Match`
-and `If-Unmodified-Since` are always for the backend.
-
-**Towards the backend**, it validates a stored response that may no longer be served (stale, or too old for the `max-age` of the request):
-its `ETag` and `Last-Modified` are sent in place of the conditions of the client. The background refresh of `stale-while-revalidate` does
-the same.
-
-- A `304` that names the validator of the stored response updates its header fields and makes it fresh again: it is served, as a `304` in
-  turn to a client that already has it. Its `Content-Type`, `Content-Encoding`, `Content-Language`, `Content-Range` and `Vary` are
-  ignored: they describe the stored body, which a `304` does not replace.
-- A `304` without validator: the stored response is served but stays stale. With another validator: the backend is asked again for a whole
-  response.
-- Any other response is sent to the client as it is and replaces the stored one.
-- Nothing to validate with means a whole response: a stored response without `ETag` nor `Last-Modified`, or a variant that is not stored
-  (the `ETag` of the other variants is not sent). Responses are not stored only to be validated either: `no-cache`, `max-age=0` and already
-  expired ones are still not cached.
-
-A `HEAD` request is never made conditional. A response with the `ETag` or the `Last-Modified` of the stored one (and its length) refreshes
-it like a `304`; a different one leaves it as it is: it is the answer to the request of a client, which must not remove what the others
-get (RFC 9111 §4.3.5 only says that the stored response SHOULD be considered stale).
-
-### Range requests
-
-Only whole responses are stored. A `GET` for some bytes of one (`Range: bytes=0-1023`) is answered from it, as the backend would
-([RFC 9110 §14](https://www.rfc-editor.org/rfc/rfc9110#section-14)):
-
-- with a `206 Partial Content` that has these bytes, in several parts when it asks for several ranges, or a `416` when there are none;
-- with the whole response when its `If-Range` is not the `ETag` or the `Last-Modified` of the stored one, when the backend said
-  `Accept-Ranges: none`, or when it asks for more than 16 ranges: each one would be a part with header fields of its own, and many small
-  ones (`bytes=0-0,2-2,…`) an answer many times larger than the request;
-- with a `304` when its `If-None-Match` or `If-Modified-Since` says it already has the response: these [conditions](#conditional-requests)
-  come first.
-
-With nothing stored, the request reaches the backend as it is and its `206` goes to the client, without being stored: a URL is cached once
-a client asks for all of it.
-
-### Stale responses
-
-A stored response that is no longer fresh is served only when allowed, for at most `staleTtl`:
-
-- **`stale-while-revalidate`** ([RFC 5861][rfc5861]): it is served at once and refreshed in the background, with at most one refresh per
-  URL and `maxRevalidations` at a time: past it, the refresh is left to a later request. Not for a request with `max-age` or `min-fresh`
-  (a browser reload), which waits for the backend. The refresh is the request that got the stale response, with its header fields: a
-  response that may not be stored leaves the stored one as it is, since it may only be about that request (`private` or `Set-Cookie` for
-  its cookies, an error for its `Authorization`, a body too large for its header fields…). Only a `404` or a `410` removes it: the
-  resource is gone. The same goes for a `304` that may not be stored, or that is about another response.
-- **`stale-if-error`**: it replaces a `500`, `502`, `503` or `504`, including those of Traefik when the backend is unreachable. A request
-  with `max-age` or `min-fresh` gets it too, one with `no-cache` does not.
-- **`max-stale`** on the request ([RFC 9111 §5.2.1.2](https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1.2)), with
-  `followClientCacheControl: true`: it is served as it is, without asking the backend nor refreshing it.
-
-As [RFC 9111][rfc9111] requires, `must-revalidate`, `proxy-revalidate`, `s-maxage` and `no-cache` forbid all three:
-`max-age=60, stale-while-revalidate=300` is served stale, `s-maxage=60, stale-while-revalidate=300` is not.
-
-For backends that don't send these directives, `defaultStaleWhileRevalidate` and `defaultStaleIfError` set the windows instead:
-`defaultStaleIfError: 10m` serves what is stored rather than a `5xx`. A directive of the response always wins (`stale-if-error=0` still
-turns it off), and the rules above still apply. With `defaultStaleWhileRevalidate`, clients can get a response older than what the backend
-asked for: on a URL that is rarely requested, by up to the whole window.
-
-An expired response is only kept in Redis while it may still be used. With an `ETag` or a `Last-Modified`, which let the cache
-[validate](#conditional-requests) it, or with `followClientCacheControl: true`, for `max-stale`, it is kept for `staleTtl`. Otherwise, it is
-kept for the longest of its `stale-while-revalidate` and `stale-if-error` windows, if it has one, and removed as soon as it expires if not.
-
-### Invalidation by unsafe methods
-
-When the backend answers a request with an unsafe method (any method that is not `GET`, `HEAD`, `OPTIONS` or `TRACE`) with a `2xx` or a
-`3xx`, the stored responses of its URL are removed, with all their variants
-([RFC 9111 §4.4][rfc9111-4.4]).
-
-- They are removed before the client gets the answer: its next `GET` is not served what was stored before. The answer itself is never held
-  back.
-- An error (`4xx`, `5xx`) changes nothing: the stored responses are kept, also for `stale-if-error`.
-- Only the URL of the request is invalidated, query and case of the host included, and only for the middleware the request goes through:
-  `POST /cart/add` does not invalidate `/cart`, nor does a `PUT` to `API.example.com` what was stored for `api.example.com`, which
-  browsers always send. The `Location` and `Content-Location` of the response are not followed.
-- There is no guarantee: if Redis cannot be reached at that moment, the stored responses stay until they expire, and a `GET` that was
-  already on its way to the backend can store its response after the invalidation.
-- Any client can trigger it, even without credentials when the backend answers it with a `2xx` or a `3xx`: see [Security](#security).
-
-### Redis failures
-
-The cache never fails a request because of Redis: what Redis cannot answer in time is forwarded to the backend, with
-`Cache-Status: traedis; fwd=bypass; detail=redis`, and its response is not stored.
-
-- Getting a connection takes at most `redis.dialTimeout`, and the whole operation `redis.timeout`: Redis has more time to send a large
-  body than to show that it is there.
-- A connection that was closed while it was idle (Redis restarted, a firewall dropped it) is replaced without a bypass.
-- After `redis.maxFailures` failures in a row, Redis is no longer asked: requests are forwarded at once, instead of each one waiting for a
-  timeout. One of them tries Redis again every `redis.retryAfter`, and the cache is back as soon as it answers.
-- The log of Traefik tells it, in lines that start with `traedis: <middleware>:`: the failures, at most once a minute, then when Redis
-  is given up on and when it is back.
+- **[Cacheable responses][spec-cacheable]**: a `GET` is cached per middleware and per URL when its status is in `statusCodes`, it is fresh
+  and complete, it fits in `maxBodyBytes`, and no header forbids it.
+- **[Variants][spec-variants]**: one cached response per value of the request headers that `Vary` names, up to `maxVariants` per URL.
+  Responses are cached by `Content-Encoding`, not by `Accept-Encoding`.
+- **[Conditional requests][spec-conditional]**: the cache answers `304` to clients that already have the response, and validates stale
+  responses with the backend's `ETag` and `Last-Modified`.
+- **[Range requests][spec-range]**: only whole responses are cached, and `Range` requests are answered from them.
+- **[Stale responses][spec-stale]**: served for `stale-while-revalidate`, `stale-if-error` or the client's `max-stale`, for at most
+  `staleTtl`.
+- **[Invalidation by unsafe methods][spec-invalidation]**: a `2xx` or `3xx` answer to a `POST`, `PUT`, `DELETE`… removes the URL's cached
+  responses.
+- **[Redis failures][spec-redis]**: requests are forwarded when Redis is slow or down, and Redis is no longer asked after
+  `redis.maxFailures` consecutive failures.
 
 ## Security
 
-A shared cache gives the response made for one client to all the others. The defaults are careful (see
-[HTTP headers](#http-headers)), but the cache only knows what the backend and the configuration tell it:
+A shared cache serves the response made for one client to all the others. The defaults are careful, but the cache only knows what your
+backend and your configuration tell it. Check these points. The [specification][spec-security] explains each of them.
 
-- **`defaultTtl` stores what the backend said nothing about.** A backend that sends no `Cache-Control` has often not thought of caches,
-  and the cache cannot always tell its personalized pages from the others (see below). `defaultTtl` is `0` by default: set it only for
-  the backends whose responses without `Cache-Control` are the same for every client.
-- **A cookie does not make a response private.** Cookies are not part of the cache key: a response with `max-age`, `s-maxage` or `Expires`
-  is stored and shared even when its request had a `Cookie` (only `defaultTtl` is never applied to an exchange with `Authorization`,
-  `authorizationHeaders`, `Cookie` or `Set-Cookie`). Whatever depends on the session must say `Cache-Control: private` or `no-store`. In the
-  same way, `public`, `s-maxage` and `must-revalidate` allow sharing the response to a request with `Authorization` or
-  `authorizationHeaders`.
-- **`private="Set-Cookie"` only keeps the cookie out.** The other header fields and the body are served to everyone: don't use it when they
-  depend on the cookie (CSRF token, user name…).
-- **Middlewares listed after the cache don't run on a hit.** `basicAuth`, `forwardAuth`, `ipAllowList` and `rateLimit` go before it. The
-  cache does not know who they let in: what it stores is shared by all of them.
-- **The cache only knows `Authorization`.** A middleware that replaces it with a header field of its own (`basicAuth` with `removeHeader`
-  and `headerField`, `forwardAuth` with `authResponseHeaders`), or an API key in a header field, makes the request look anonymous: with a
-  `defaultTtl`, the response it gets without `Cache-Control` is stored for it, and the page of one user served to the others. List these
-  header fields in `authorizationHeaders` (`[X-WebAuth-User]`): their requests are then treated as those with `Authorization`.
-- **The key is the URL the cache sees, not the router.** The routers that use the same cache middleware share its stored responses: when
-  two of them answer the same URL with different backends, one kept for some clients (by `ClientIP`, a header, an entry point…) and the
-  other not, each one serves what the other stored. A middleware that rewrites the URL before the cache (`stripPrefix`, `replacePath`…)
-  does the same: `/v1/users` and `/v2/users`, both stripped to `/users`, share their stored responses. Give such routers a cache middleware
-  each, and rewrite the URL after it.
-- **What the response depends on must be in `Vary`.** When the backend reads a request header that its `Vary` does not name
-  (`Forwarded`, `X-Original-URL`, `User-Agent`, `Accept-Language`…), one client chooses what the others get. Traefik replaces the
-  `X-Forwarded-*` header fields of the clients it does not trust, but not these. With `followClientCacheControl: true`, it also chooses
-  when: `Cache-Control: no-cache` replaces the stored response with what the backend answers to its request. The cache only tells one such
-  response from the others: a redirection to its own URL, which it never stores. A backend sends one when it takes the scheme of a header
-  field that Traefik leaves to the clients (`X-Forwarded-Scheme` or `X-Forwarded-Ssl` for Rails' `force_ssl`): stored for `defaultTtl`,
-  it would send every client in a loop. With a `statusCodes` that lists errors, such a header field can also have one stored for everyone
-  (`X-HTTP-Method-Override` makes some backends answer `405`). The host is not one of them: the key keeps its case, as the backend gets it.
-- **Behind a proxy that terminates TLS, Traefik has to trust it.** The scheme of the key is the one of `X-Forwarded-Proto`, which Traefik
-  sets to the one of the connection, unless a proxy it trusts sent it: list that proxy in the `forwardedHeaders.trustedIPs` of the entry
-  point. Otherwise, `https` requests reach Traefik over `http` like the others and share their stored responses: a redirection of the
-  `http` requests to `https` then answers the `https` ones too, which follow it in a loop.
-- **Clients can always reach the backend.** A random query string is a miss (and `Cache-Control: no-cache` skips the cache, with
-  `followClientCacheControl: true`): put a `rateLimit` before it.
-- **Clients can tell what others requested.** A response served from the cache has a `Cache-Status` that says so, and an `Age`, which
-  [RFC 9111 §4][rfc9111] requires: a client learns whether someone else requested a URL (`/export?user=42`), and when. With
-  `exposeCacheStatus: false`, clients no longer see what the cache did (`fwd-status` of the backend, `detail=redis`…), but `Age` still
-  tells a hit. `only-if-cached` would tell it without storing the URL: it is ignored by default.
-- **Bodies are held in memory.** A response is copied in full to be stored, and a stored one is read in full from Redis to be sent: each
-  one stays in the memory of Traefik until its client got it all, which a slow client makes last. Past `maxBufferedBytes` for all of them
-  (bodies up to 32 KiB are not counted, no more than what Traefik buffers anyway), a response is sent without being stored, and a stored
-  one is not sent from the cache (`fwd=bypass; detail=memory`): the backend gets the requests. Put an `inFlightReq` before the cache:
-  `rateLimit` bounds how often a client sends requests, not how many of them it keeps waiting at once.
-- **Clients can remove stored responses.** As [RFC 9111][rfc9111-4.4] requires, a `2xx` or a `3xx` answer to an unsafe method, even one
-  the backend does not know (`FOO`), removes the stored responses of its URL for everyone. A backend that answers any method like a `GET`,
-  or that redirects an anonymous `POST` to its login page, lets any client empty the cache of any URL as often as it wants, and choose when
-  it is stored again (with what a header field that `Vary` does not name makes the backend answer). Have the backend refuse the methods it
-  does not handle with a `405`, or let only those reach it with the rule of the router, as for a site that is only read:
-  ``Host(`app.example.com`) && (Method(`GET`) || Method(`HEAD`))``. Safe methods remove nothing, but for a `404` or a `410` that the
-  [background refresh](#stale-responses) of a stale response gets.
-- **Cache pollution and cache flooding.** Each URL has its own entry, and the cache cannot know which query parameters the backend ignores:
-  `?x=1`, `?x=2`… store the same response again and again, each one up to `maxBodyBytes` and for its freshness plus, at most, `staleTtl`
-  (see [Stale responses](#stale-responses)). Nothing bounds the number of URLs: a client can fill Redis with entries that nobody asks for
-  again (flooding), which then take the place of the useful ones (pollution). Give Redis a `maxmemory` with the `allkeys-lfu` policy, so
-  that entries requested once are evicted first, and have the backend refuse the URLs it does not know: with the default `statusCodes`, no
-  error is stored. A redirection is, with `s-maxage`, `max-age` or `Expires`, and a `301` or a `308` even without them when a `defaultTtl`
-  is set.
-- **Redirections are shared too.** A backend that sends the same `Cache-Control: public, max-age=…` on all its responses has its
-  redirection of anonymous clients to its login page stored, then served to the clients that are logged in. Have it send `private` or
-  `no-store` with what depends on the client, redirections included, or leave `3xx` out of `statusCodes` (`["200-299"]`).
-- **Redis is trusted.** Whoever writes to it chooses what clients are served, and whoever reads it gets the stored responses: keep it for
-  the cache only. With `redis://`, the connection is not encrypted, password included: keep it on a private network, or use `rediss://`.
-
-Hence the order of the middlewares of a router:
+- **Leave `defaultTtl` at `0`**, unless every response that your backend sends without `Cache-Control` is the same for all clients.
+- **Have your backend send `private` or `no-store` with whatever depends on the client**, redirections included, or leave `3xx` out of
+  `statusCodes`. Cookies are not part of the cache key, and `private="Set-Cookie"` only keeps the cookie itself out.
+- **List in `authorizationHeaders` the headers that identify the client** when it is not `Authorization`: an API key, or the header that
+  `basicAuth` or `forwardAuth` set (`X-WebAuth-User`).
+- **Name in `Vary` every request header that the response depends on** (`User-Agent`, `Accept-Language`, `Forwarded`…). Otherwise, one
+  client chooses what the others get.
+- **Give each router its own cache middleware** when routers share URLs but not backends, or when they rewrite the URL. Rewrite it after
+  the cache, not before.
+- **Behind a proxy that terminates TLS, list it in the entry point's `forwardedHeaders.trustedIPs`**, so that `http` and `https`
+  requests don't share cached responses.
+- **Have your backend refuse the methods it does not handle with a `405`**, or filter them in the router rule. Otherwise, any client can
+  empty the cache of any URL.
+- **Give Redis a `maxmemory` with the `allkeys-lfu` policy**, and keep it for the cache only, on a private network or behind `rediss://`.
+- **Set `exposeCacheStatus: false`** if clients must not see what the cache did. `Age` still tells them that a response was served from
+  the cache, and so that someone else requested it.
+- **Put authentication, `rateLimit` and `inFlightReq` before the cache**:
 
 ```yaml
 http:
   routers:
     my-app:
       middlewares:
-        - auth        # before the cache: a hit is served without running what comes after it
-        - ratelimit   # before the cache: random URLs are misses that reach the backend
-        - inflightreq # before the cache: each request may hold a body in memory
+        - auth        # a hit is served without running what comes after the cache
+        - ratelimit   # random URLs are misses that reach the backend
+        - inflightreq # each request may hold a body in memory
         - cache
 ```
 
 ## Performance
 
-A hit is served from Traedis in about 1.5 ms, whatever the backend costs: the slower the backend, the larger the gain. A miss takes no longer
-than the backend alone: its response is stored once the client has it.
+A hit is served in about 1.5 ms, whatever the backend costs, so the slower the backend, the larger the gain. A miss takes no longer than
+the backend alone, since its response is cached after the client receives it.
 
 Load test through Traefik with 10 concurrent clients, as requests per second and median latency:
 
@@ -436,12 +262,21 @@ See [CONTRIBUTING.md][contributing] for the local stack, the tests and the rules
 
 [ci]: https://www.github.com/eleaven/traedis/actions/workflows/ci.yml
 [releases]: https://github.com/eleaven/traedis/releases
+[catalog]: https://plugins.traefik.io/plugins/6acde5da1c6f05d528c59972/traedis
+[gomod]: https://github.com/eleaven/traedis/blob/main/go.mod
 [rfc9111]: https://www.rfc-editor.org/rfc/rfc9111
-[rfc9111-4.1]: https://www.rfc-editor.org/rfc/rfc9111#section-4.1
-[rfc9111-4.3]: https://www.rfc-editor.org/rfc/rfc9111#section-4.3
-[rfc9111-4.4]: https://www.rfc-editor.org/rfc/rfc9111#section-4.4
 [rfc5861]: https://www.rfc-editor.org/rfc/rfc5861
 [rfc9211]: https://www.rfc-editor.org/rfc/rfc9211
+[spec]: https://github.com/eleaven/traedis/blob/main/SPEC.md
+[spec-cacheable]: https://github.com/eleaven/traedis/blob/main/SPEC.md#cacheable-responses
+[spec-variants]: https://github.com/eleaven/traedis/blob/main/SPEC.md#variants
+[spec-conditional]: https://github.com/eleaven/traedis/blob/main/SPEC.md#conditional-requests
+[spec-range]: https://github.com/eleaven/traedis/blob/main/SPEC.md#range-requests
+[spec-stale]: https://github.com/eleaven/traedis/blob/main/SPEC.md#stale-responses
+[spec-invalidation]: https://github.com/eleaven/traedis/blob/main/SPEC.md#invalidation-by-unsafe-methods
+[spec-redis]: https://github.com/eleaven/traedis/blob/main/SPEC.md#redis-failures
+[spec-security]: https://github.com/eleaven/traedis/blob/main/SPEC.md#security
+[spec-abuse]: https://github.com/eleaven/traedis/blob/main/SPEC.md#abuse-by-clients
 [bench-run]: https://www.github.com/eleaven/traedis/actions/runs/38480761928/attempts/1#summary-115582483916
 [whoami]: https://github.com/eleaven/traedis/blob/main/example/dynamic/whoami.yml
 [placeholder]: https://github.com/eleaven/traedis/blob/main/example/dynamic/placeholder.yml
