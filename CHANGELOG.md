@@ -3,7 +3,7 @@
 What each release changes for those who use the plugin, the latest first. The section of a version is the text of its
 [GitHub release](https://github.com/eleaven/traedis/releases): the CI reads it from this file.
 
-## v0.4.0
+## v0.4.0 – 2026-10-21
 
 Safer defaults and less memory in Redis: see the breaking changes before upgrading.
 
