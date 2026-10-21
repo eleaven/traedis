@@ -9,8 +9,18 @@ import (
 	"time"
 )
 
+// testConfig returns the default configuration, with the redis.dsn that it requires.
+func testConfig() *Config {
+	cfg := CreateConfig()
+	cfg.Redis.DSN = "redis://cache:6379/0"
+	return cfg
+}
+
 func TestCreateConfigDefaults(t *testing.T) {
-	s, err := parseConfig(CreateConfig())
+	if _, err := parseConfig(CreateConfig()); err == nil || !strings.Contains(err.Error(), "redis.dsn is required") {
+		t.Fatalf("default config without redis.dsn: err = %v", err)
+	}
+	s, err := parseConfig(testConfig())
 	if err != nil {
 		t.Fatalf("default config rejected: %v", err)
 	}
@@ -282,6 +292,7 @@ func TestParseConfig(t *testing.T) {
 			mutate:  func(c *Config) { c.Redis.DSN = "rediss://cache"; c.Redis.TLS.CA = "-----BEGIN CERTIFICATE-----\n" },
 			wantErr: "redis.tls.ca: no certificate found",
 		},
+		{name: "dsn blank", mutate: func(c *Config) { c.Redis.DSN = " " }, wantErr: "redis.dsn is required"},
 		{name: "dsn missing host", mutate: func(c *Config) { c.Redis.DSN = "redis:///0" }, wantErr: "host"},
 		{name: "dsn invalid database", mutate: func(c *Config) { c.Redis.DSN = "redis://cache/abc" }, wantErr: "database"},
 		{
@@ -308,7 +319,7 @@ func TestParseConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := CreateConfig()
+			cfg := testConfig()
 			tt.mutate(cfg)
 			s, err := parseConfig(cfg)
 			if tt.wantErr != "" {
@@ -377,7 +388,7 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 }
 
 func TestNewRejectsInvalidConfig(t *testing.T) {
-	cfg := CreateConfig()
+	cfg := testConfig()
 	cfg.DefaultTTL = "nope"
 	if _, err := New(context.Background(), http.NotFoundHandler(), cfg, "cache"); err == nil {
 		t.Fatal("expected an error")

@@ -40,7 +40,7 @@ func (b *backend) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func newTestCache(t *testing.T, b http.Handler, mutate func(*Config)) (*cache, *memStore) {
 	t.Helper()
-	cfg := CreateConfig()
+	cfg := testConfig()
 	if mutate != nil {
 		mutate(cfg)
 	}

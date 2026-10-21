@@ -66,11 +66,11 @@ available in [`compose.yml`][compose] and [`example/`][example].
 
 ## Configuration
 
-All keys are optional. Durations use the [Go syntax](https://pkg.go.dev/time#ParseDuration) (`50ms`, `5m`, `1h`).
+All keys but `redis.dsn` are optional. Durations use the [Go syntax](https://pkg.go.dev/time#ParseDuration) (`50ms`, `5m`, `1h`).
 
 | Key                            | Default                | Description                                                                                                                                    |
 |--------------------------------|------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| `redis.dsn`                    | `redis://cache:6379/0` | `redis://[user[:password]@]host[:port][/db]`, or `rediss://` for TLS: the certificate of Redis is then verified.                               |
+| `redis.dsn`                    | required               | `redis://[user[:password]@]host[:port][/db]`, or `rediss://` for TLS: the certificate of Redis is then verified.                               |
 | `redis.tls.ca`                 | system authorities     | With `rediss://`, the authorities that may have signed the certificate of Redis: a PEM file, or its content.                                   |
 | `redis.tls.insecureSkipVerify` | `false`                | With `rediss://`, accept any certificate: the connection is encrypted, but Redis may be anyone.                                                |
 | `redis.poolSize`               | `10`                   | Connections to Redis, at most, for each middleware in each Traefik instance. A request that finds them all busy waits for one.                 |

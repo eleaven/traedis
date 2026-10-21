@@ -10,7 +10,7 @@ import (
 var t0 = time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
 
 func testSettings() settings {
-	s, err := parseConfig(CreateConfig())
+	s, err := parseConfig(testConfig())
 	if err != nil {
 		panic(err)
 	}

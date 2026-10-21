@@ -64,7 +64,6 @@ type RedisTLSConfig struct {
 func CreateConfig() *Config {
 	return &Config{
 		Redis: RedisConfig{
-			DSN:         "redis://cache:6379/0",
 			PoolSize:    10,
 			DialTimeout: "50ms",
 			Timeout:     "1s",
@@ -363,6 +362,9 @@ func setTLS(o *redisOptions, cfg RedisTLSConfig) error {
 // credentials.
 func parseDSN(dsn string) (redisOptions, error) {
 	var o redisOptions
+	if strings.TrimSpace(dsn) == "" {
+		return o, errors.New("redis.dsn is required")
+	}
 	u, err := url.Parse(strings.TrimSpace(dsn))
 	if err != nil {
 		return o, errors.New("redis.dsn: malformed URL")
