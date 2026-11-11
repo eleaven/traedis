@@ -6,7 +6,8 @@ documents specify its behaviour.
 
 - [Caching rules](#caching-rules): [cacheable responses](#cacheable-responses), [variants](#variants),
   [conditional requests](#conditional-requests), [range requests](#range-requests), [stale responses](#stale-responses),
-  [invalidation by unsafe methods](#invalidation-by-unsafe-methods), [Redis failures](#redis-failures)
+  [collapsed requests](#collapsed-requests), [invalidation by unsafe methods](#invalidation-by-unsafe-methods),
+  [Redis failures](#redis-failures)
 - [Security](#security): [personalized responses](#personalized-responses), [middlewares and cache key](#middlewares-and-cache-key),
   [abuse by clients](#abuse-by-clients), [Redis](#redis)
 
@@ -140,6 +141,29 @@ An expired response is only kept in Redis while it may still be used:
 - otherwise, for the longest of its `stale-while-revalidate` and `stale-if-error` windows;
 - without any of these, it is removed as soon as it expires.
 
+### Collapsed requests
+
+With `collapseTimeout`, requests for a URL that is being fetched wait for its response instead of all reaching the backend: a cold or
+expired URL that many clients request at once costs the backend one request ([RFC 9211 §2.6][rfc9211-2.6]). It is off by default.
+
+- **Which requests wait.** A `GET` or a `HEAD` that nothing cached can answer: a miss, or a stale response that may not be served. They
+  wait for a `GET` already forwarded for the same URL, through the same middleware and Traefik instance. Without one, the request is
+  forwarded, and the next ones wait for it, unless its response cannot be cached for them: a `HEAD`, a request with `no-store`
+  (`followClientCacheControl: true`), or a conditional one that the cache has no validator to replace. Requests whose `max-age` or
+  `min-fresh` refuse a fresh response, and `only-if-cached`, never wait.
+- **Once the response is cached**, the requests that waited look for it, as any request does, with their own headers. The variant they
+  select, their conditions and their `Range` apply: a request is never sent a response that it would not get from the cache.
+  `Cache-Status` reads `fwd=uri-miss; ttl=N; collapsed` (or `fwd=vary-miss`, `fwd=stale`). One that selects another variant waits for the
+  next request forwarded, or is forwarded and the next ones wait for it.
+- **When the response will not be cached**, the requests that wait are forwarded at once, together, as soon as its status and header say
+  so (`private`, `no-store`, `Set-Cookie`, a status outside `statusCodes`, a `304` that leaves the cached response as is…). A body larger
+  than `maxBodyBytes`, a backend that fails or a client that goes away let them go once the request ends.
+- **They wait for at most `collapseTimeout`**, whatever the request forwarded is doing, and are then forwarded. Its response is cached once
+  its client has received all of it: a slow client makes the others wait, up to that bound. A few seconds is enough for most backends.
+
+The cost is for URLs whose responses are never cached: the requests that arrive while one of them is forwarded wait for its status before
+they are forwarded too. Leave `collapseTimeout` at `0` when concurrent requests for the same uncacheable URL are the norm.
+
 ### Invalidation by unsafe methods
 
 When the backend answers an unsafe method (any method but `GET`, `HEAD`, `OPTIONS` and `TRACE`) with a `2xx` or a `3xx`, the cache
@@ -225,6 +249,8 @@ backend and the configuration tell it. The [README](README.md#security) sums up 
   [RFC 9111 §4][rfc9111] requires. A client learns whether someone else requested a URL (`/export?user=42`), and when. With
   `exposeCacheStatus: false`, clients no longer see what the cache did (the backend's `fwd-status`, `detail=redis`…), but `Age` still
   reveals a hit. `only-if-cached` would tell it without caching the URL, which is why it is ignored by default.
+- **Clients can make others wait**, with `collapseTimeout`: the request of a client that reads its response slowly is the one that the
+  next requests for its URL [wait for](#collapsed-requests), for at most `collapseTimeout`.
 - **Bodies are held in memory.** A response is copied in full to be cached, and a cached one is read in full from Redis to be sent. Each
   one stays in Traefik's memory until its client has received all of it, which a slow client makes last. Past `maxBufferedBytes` for all
   of them, the cache steps aside (`fwd=bypass; detail=memory`). A response is sent without being cached, a cached one is not sent, and the
@@ -257,3 +283,4 @@ backend and the configuration tell it. The [README](README.md#security) sums up 
 [rfc9111-4.3]: https://www.rfc-editor.org/rfc/rfc9111#section-4.3
 [rfc9111-4.4]: https://www.rfc-editor.org/rfc/rfc9111#section-4.4
 [rfc9111-5.2.1.2]: https://www.rfc-editor.org/rfc/rfc9111#section-5.2.1.2
+[rfc9211-2.6]: https://www.rfc-editor.org/rfc/rfc9211#section-2.6

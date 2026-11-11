@@ -28,6 +28,7 @@ testData:
   maxVariants: 16
   maxRevalidations: 10
   revalidationTimeout: 30s
+  collapseTimeout: 0
   sortQuery: false
   authorizationHeaders: [ ]
   followClientCacheControl: false

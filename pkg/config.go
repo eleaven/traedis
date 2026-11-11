@@ -34,6 +34,7 @@ type Config struct {
 	MaxVariants                 int         `json:"maxVariants,omitempty"`
 	MaxRevalidations            int         `json:"maxRevalidations,omitempty"`
 	RevalidationTimeout         string      `json:"revalidationTimeout,omitempty"`
+	CollapseTimeout             string      `json:"collapseTimeout,omitempty"`
 	SortQuery                   bool        `json:"sortQuery,omitempty"`
 	AuthorizationHeaders        []string    `json:"authorizationHeaders,omitempty"`
 	FollowClientCacheControl    bool        `json:"followClientCacheControl,omitempty"`
@@ -80,6 +81,7 @@ func CreateConfig() *Config {
 		MaxVariants:                 16,
 		MaxRevalidations:            10,
 		RevalidationTimeout:         "30s",
+		CollapseTimeout:             "0",
 		SortQuery:                   false,
 		AuthorizationHeaders:        []string{},
 		FollowClientCacheControl:    false,
@@ -105,6 +107,9 @@ type settings struct {
 	// Background revalidations (RFC 5861 §3) are bounded: maxRevalidations at once, each given revalidationTimeout (see revalidate).
 	maxRevalidations    int
 	revalidationTimeout time.Duration
+	// collapseTimeout is how long, at most, a request that missed waits for the response to another request for its URL rather than being
+	// forwarded too (see collapse). 0: requests never wait.
+	collapseTimeout time.Duration
 	// sortQuery makes the order of the query parameters irrelevant to the cache key (see cacheURI).
 	sortQuery bool
 	// authorizationHeaders lists the request header fields that tell who the client is, as Authorization does (see storeTTL): canonical
@@ -230,6 +235,9 @@ func parseConfig(cfg *Config) (settings, error) {
 	}
 	if s.revalidationTimeout <= 0 {
 		return s, errors.New("revalidationTimeout must be positive")
+	}
+	if s.collapseTimeout, err = parseDuration("collapseTimeout", cfg.CollapseTimeout); err != nil {
+		return s, err
 	}
 
 	s.sortQuery = cfg.SortQuery

@@ -16,6 +16,8 @@ type cacheStatus struct {
 	fwdStatus int           // status received from the backend
 	key       string        // only when exposeKey is set
 	detail    string        // token: redis, stale-while-revalidate, stale-if-error, max-stale or invalidated
+	// collapsed: the response sent is the one stored for another request that was forwarded, which this one waited for (see collapse).
+	collapsed bool
 }
 
 func (s cacheStatus) String() string {
@@ -30,6 +32,9 @@ func (s cacheStatus) String() string {
 	}
 	if s.hit || s.served {
 		v += "; ttl=" + strconv.FormatInt(int64(s.ttl/time.Second), 10)
+	}
+	if s.collapsed {
+		v += "; collapsed"
 	}
 	if s.key != "" {
 		v += "; key=" + strconv.Quote(s.key)
