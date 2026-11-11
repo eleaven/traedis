@@ -89,6 +89,7 @@ All keys but `redis.dsn` are optional. Durations use the [Go syntax](https://pkg
 | `maxVariants`                  | `16`                | Maximum cached [variants][spec-variants] per URL. `0`: responses with `Vary` are not cached.                                                              |
 | `maxRevalidations`             | `10`                | Maximum [background refreshes][spec-stale] running at once, per middleware and per Traefik instance.                                                      |
 | `revalidationTimeout`          | `30s`               | Maximum duration of a background refresh.                                                                                                                 |
+| `collapseTimeout`              | `0`                 | How long [requests that wait][spec-collapse] for the response to another request for their URL wait, at most. `0`: they don't.                            |
 | `sortQuery`                    | `false`             | Sort the query parameters by name in the cache key, so that `?a=1&b=2` and `?b=2&a=1` share a cached response. Only for backends that ignore their order. |
 | `authorizationHeaders`         | `[]`                | Request headers that identify the client, as `Authorization` does (`X-WebAuth-User`). Requests with one are treated like those with `Authorization`.      |
 | `followClientCacheControl`     | `false`             | Follow the request's `Cache-Control`, whose directives are advisory. See [Sent by the client](#sent-by-the-client).                                       |
@@ -170,6 +171,7 @@ with what the backend answers to its own request, get a stale one, and tell whet
 | `fwd=stale`                                                | Forwarded: the cached response is stale.                                                                                                                 |
 | `fwd=request`                                              | Forwarded: the request has `no-cache`, or its `max-age` or `min-fresh` refuses a cached response that is still fresh (`followClientCacheControl: true`). |
 | `fwd=stale; fwd-status=304; ttl=N`                         | [Validated][spec-conditional] by the backend: the cached response is served, fresh again for `N` seconds.                                                |
+| `fwd=uri-miss; ttl=N; collapsed`                           | Forwarded with another request, which it [waited for][spec-collapse]: served its cached response, fresh for `N` more seconds.                            |
 | `fwd=stale; fwd-status=503; ttl=-N; detail=stale-if-error` | The backend failed: the cached response is served instead of its error.                                                                                  |
 | `fwd=bypass`                                               | Forwarded untouched: WebSocket upgrade, server-sent events or request with a body.                                                                       |
 | `fwd=bypass; detail=redis`                                 | Forwarded: Redis [failed, timed out or is no longer asked][spec-redis].                                                                                  |
@@ -197,6 +199,8 @@ The [specification][spec] details each rule. In short:
 - **[Range requests][spec-range]**: only whole responses are cached, and `Range` requests are answered from them.
 - **[Stale responses][spec-stale]**: served for `stale-while-revalidate`, `stale-if-error` or the client's `max-stale`, for at most
   `staleTtl`.
+- **[Collapsed requests][spec-collapse]**: with `collapseTimeout`, the requests for a URL that is being fetched wait for its response,
+  which the backend then gets once.
 - **[Invalidation by unsafe methods][spec-invalidation]**: a `2xx` or `3xx` answer to a `POST`, `PUT`, `DELETE`… removes the URL's cached
   responses.
 - **[Redis failures][spec-redis]**: requests are forwarded when Redis is slow or down, and Redis is no longer asked after
@@ -273,6 +277,7 @@ See [CONTRIBUTING.md][contributing] for the local stack, the tests and the rules
 [spec-conditional]: https://github.com/eleaven/traedis/blob/main/SPEC.md#conditional-requests
 [spec-range]: https://github.com/eleaven/traedis/blob/main/SPEC.md#range-requests
 [spec-stale]: https://github.com/eleaven/traedis/blob/main/SPEC.md#stale-responses
+[spec-collapse]: https://github.com/eleaven/traedis/blob/main/SPEC.md#collapsed-requests
 [spec-invalidation]: https://github.com/eleaven/traedis/blob/main/SPEC.md#invalidation-by-unsafe-methods
 [spec-redis]: https://github.com/eleaven/traedis/blob/main/SPEC.md#redis-failures
 [spec-security]: https://github.com/eleaven/traedis/blob/main/SPEC.md#security

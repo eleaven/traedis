@@ -138,6 +138,7 @@ http:
             dsn: "redis://cache:6379/2"
           defaultTtl: 5m # 0 by default: whoami sends no Cache-Control, nothing would be stored
           maxBodyBytes: 5120 # 5 KiB
+          collapseTimeout: 5s # 0 by default: concurrent requests for a URL being fetched wait for its response
     whoami-client:
       plugin:
         traedis:

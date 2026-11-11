@@ -44,6 +44,9 @@ func TestCreateConfigDefaults(t *testing.T) {
 	if s.maxRevalidations != 10 || s.revalidationTimeout != 30*time.Second {
 		t.Errorf("maxRevalidations = %d, revalidationTimeout = %v", s.maxRevalidations, s.revalidationTimeout)
 	}
+	if s.collapseTimeout != 0 {
+		t.Errorf("requests must not wait for each other unless configured: collapseTimeout = %v", s.collapseTimeout)
+	}
 	if len(s.authorizationHeaders) != 0 || s.followClientCacheControl || !s.exposeCacheStatus {
 		t.Errorf(
 			"authorizationHeaders = %v, followClientCacheControl = %v, exposeCacheStatus = %v",
@@ -75,6 +78,17 @@ func TestParseConfig(t *testing.T) {
 		{name: "zero maxRevalidations", mutate: func(c *Config) { c.MaxRevalidations = 0 }, wantErr: "maxRevalidations"},
 		{name: "invalid revalidationTimeout", mutate: func(c *Config) { c.RevalidationTimeout = "30" }, wantErr: "revalidationTimeout"},
 		{name: "zero revalidationTimeout", mutate: func(c *Config) { c.RevalidationTimeout = "0s" }, wantErr: "revalidationTimeout"},
+		{name: "invalid collapseTimeout", mutate: func(c *Config) { c.CollapseTimeout = "5" }, wantErr: "collapseTimeout"},
+		{name: "negative collapseTimeout", mutate: func(c *Config) { c.CollapseTimeout = "-1s" }, wantErr: "collapseTimeout"},
+		{
+			name:   "collapseTimeout",
+			mutate: func(c *Config) { c.CollapseTimeout = "5s" },
+			check: func(t *testing.T, s settings) {
+				if s.collapseTimeout != 5*time.Second {
+					t.Errorf("collapseTimeout = %v", s.collapseTimeout)
+				}
+			},
+		},
 		{name: "negative redis.maxFailures", mutate: func(c *Config) { c.Redis.MaxFailures = -1 }, wantErr: "redis.maxFailures"},
 		{
 			name:   "redis.maxFailures 0 never gives up on Redis",
@@ -376,6 +390,7 @@ func TestNewWithTestDataWithoutRedis(t *testing.T) {
 	cfg.MaxVariants = 16
 	cfg.MaxRevalidations = 10
 	cfg.RevalidationTimeout = "30s"
+	cfg.CollapseTimeout = "0"
 	cfg.SortQuery = false
 	cfg.AuthorizationHeaders = []string{}
 	cfg.FollowClientCacheControl = false

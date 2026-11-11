@@ -34,6 +34,11 @@ func TestCacheStatusString(t *testing.T) {
 			want: "traedis; fwd=stale; fwd-status=503; ttl=-12; detail=stale-if-error",
 		},
 		{
+			name: "RFC 9211 collapsed: forwarded, and served the response of another request",
+			s:    cacheStatus{fwd: "uri-miss", served: true, ttl: 59 * time.Second, collapsed: true},
+			want: "traedis; fwd=uri-miss; ttl=59; collapsed",
+		},
+		{
 			name: "RFC 9211 key",
 			s:    cacheStatus{hit: true, ttl: time.Second, key: "traedis:abc"},
 			want: `traedis; hit; ttl=1; key="traedis:abc"`,
