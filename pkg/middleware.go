@@ -31,7 +31,8 @@ type cache struct {
 	writing map[string]*pendingWrite // keys being written to (see later), at most redis.poolSize
 
 	flightMu sync.Mutex
-	flights  map[string]*flight // keys being forwarded for requests that wait (see collapse), one per request forwarded
+	flights  map[string]*flight   // keys being forwarded for requests that wait (see collapse), one per request forwarded
+	unstored map[string]time.Time // keys whose last response may never be stored, until when (see sawResponse), at most maxUnstored
 
 	bodies *budget // the bodies held in memory, at most maxBufferedBytes
 }
@@ -60,6 +61,7 @@ func newCache(next http.Handler, name string, cfg settings, s store) *cache {
 		revalidating: map[string]bool{},
 		writing:      map[string]*pendingWrite{},
 		flights:      map[string]*flight{},
+		unstored:     map[string]time.Time{},
 		bodies:       &budget{max: cfg.maxBufferedBytes},
 	}
 }
@@ -760,6 +762,10 @@ func (m *missHook) beforeHeader(code int, h http.Header) disposition {
 		e := &entry{status: code, header: h, requestTime: m.requestTime, responseTime: m.responseTime}
 		ttl, ok := storeTTL(m.req, m.reqCC, e, cc, m.c.cfg)
 		m.store = ok
+		if m.c.cfg.collapseTimeout > 0 {
+			// Whether the next requests for the URL may wait for one another (see collapse).
+			m.c.sawResponse(m.key, ok, !ok && neverStored(h, cc, code, m.responseTime, m.c.cfg))
+		}
 		if ok {
 			m.ttl = ttl
 			e.header = headerToStore(h, cc)

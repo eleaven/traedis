@@ -2,7 +2,15 @@ package traedis
 
 import (
 	"net/http"
+	"slices"
 	"time"
+)
+
+// A URL whose response says it may never be stored is not waited for during unstoredFor (see neverStored): its requests would only wait
+// for the header of another one before being forwarded too. At most maxUnstored URLs are remembered per middleware and Traefik instance.
+const (
+	unstoredFor = time.Minute
+	maxUnstored = 4096
 )
 
 // flight is a request forwarded for a key that the next requests for the key wait for, rather than being forwarded too (see collapse).
@@ -44,10 +52,15 @@ func leads(r *http.Request, reqCC cacheControl, stored *entry) bool {
 //   - when the request fails or its client goes away, without anything stored: they are forwarded too;
 //   - after collapseTimeout, whatever the request forwarded is doing: they are forwarded too, and don't wait again.
 //
-// Requests only wait for those of the same Traefik instance and middleware. They hold no body of the memory budget while they wait.
+// Requests only wait for those of the same Traefik instance and middleware. They hold no body of the memory budget while they wait. Those
+// for a URL whose last response may never be stored don't wait (see neverStored).
 func (c *cache) collapse(
 	w http.ResponseWriter, r *http.Request, key, field string, reqCC cacheControl, status cacheStatus, stored *entry,
 ) {
+	if c.unstoredLately(key) {
+		c.forward(w, r, key, field, reqCC, status, true, stored, nil)
+		return
+	}
 	deadline := time.Now().Add(c.cfg.collapseTimeout)
 	for {
 		f, leader := c.join(key, leads(r, reqCC, stored))
@@ -116,6 +129,69 @@ func (c *cache) land(key string, f *flight, pass bool) {
 		close(f.done)
 	}
 	c.flightMu.Unlock()
+}
+
+// neverStored reports whether a response that may not be stored says so itself, for any client: its status is one that statusCodes allows,
+// and its header forbids storing it (private, no-store, no-cache, a cookie, Vary: *…), or gives it no freshness. Not a status outside
+// statusCodes, such as an error that may only last as long as an outage, nor what depends on the request (Authorization, a cookie that
+// rules out defaultTtl) or on how the response ends (too large, cut short).
+func neverStored(h http.Header, cc cacheControl, status int, responseTime time.Time, cfg settings) bool {
+	if !slices.Contains(cfg.statusCodes, status) {
+		return false
+	}
+	if cc.noStore || cc.private || cc.noCache || (cc.mustUnderstand && !understood(status)) {
+		return true
+	}
+	if len(h.Values("Set-Cookie")) > 0 && !slices.Contains(cc.unstored, "Set-Cookie") {
+		return true
+	}
+	if !storableVary(h, cfg.maxVariants) {
+		return true
+	}
+	lifetime, explicit := explicitFreshness(h, cc, responseTime)
+	if !explicit {
+		return cfg.defaultTTL <= 0 || !heuristicallyCacheable(status)
+	}
+	return lifetime <= 0
+}
+
+// sawResponse remembers whether the response to a GET for key may be stored: one that never may (see neverStored) keeps the requests for
+// key from waiting during unstoredFor, one that may lets them wait again at once. Only with collapseTimeout.
+func (c *cache) sawResponse(key string, storable, never bool) {
+	if c.cfg.collapseTimeout <= 0 || (!storable && !never) {
+		return
+	}
+	now := time.Now()
+	c.flightMu.Lock()
+	defer c.flightMu.Unlock()
+	if storable {
+		delete(c.unstored, key)
+		return
+	}
+	if _, known := c.unstored[key]; !known && len(c.unstored) >= maxUnstored {
+		// Full: what expired goes. Still full, key is not remembered, and its requests wait as they would without this.
+		for k, until := range c.unstored {
+			if now.After(until) {
+				delete(c.unstored, k)
+			}
+		}
+		if len(c.unstored) >= maxUnstored {
+			return
+		}
+	}
+	c.unstored[key] = now.Add(unstoredFor)
+}
+
+// unstoredLately reports whether the last response for key, less than unstoredFor ago, may never be stored.
+func (c *cache) unstoredLately(key string) bool {
+	c.flightMu.Lock()
+	defer c.flightMu.Unlock()
+	until, ok := c.unstored[key]
+	if ok && time.Now().After(until) {
+		delete(c.unstored, key)
+		return false
+	}
+	return ok
 }
 
 // landed reports whether f landed and, if so, whether it said to pass.

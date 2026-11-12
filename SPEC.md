@@ -160,9 +160,15 @@ expired URL that many clients request at once costs the backend one request ([RF
   than `maxBodyBytes`, a backend that fails or a client that goes away let them go once the request ends.
 - **They wait for at most `collapseTimeout`**, whatever the request forwarded is doing, and are then forwarded. Its response is cached once
   its client has received all of it: a slow client makes the others wait, up to that bound. A few seconds is enough for most backends.
+- **A URL whose response says it may never be cached is not waited for, for a minute.** Its header forbids caching it for any client
+  (`private`, `no-store`, `no-cache`, `Set-Cookie`, `Vary: *`, `max-age=0`, or no freshness at all without `defaultTtl`), and its status
+  is in `statusCodes`. Its requests are then forwarded at once, as without `collapseTimeout`, and the minute starts again with each such
+  response. A response that may be cached ends it at once. An error does not start it, since an outage would then turn collapsing off
+  when the backend comes back, nor does what depends on the request (its `Authorization`), its size or its end. At most 4,096 URLs are
+  remembered per middleware and Traefik instance; past that, the others are waited for.
 
-The cost is for URLs whose responses are never cached: the requests that arrive while one of them is forwarded wait for its status before
-they are forwarded too. Leave `collapseTimeout` at `0` when concurrent requests for the same uncacheable URL are the norm.
+What it still costs is for the URLs whose responses are never cached, once a minute at most: the requests that arrive while one of them is
+forwarded wait for its status before they are forwarded too.
 
 ### Invalidation by unsafe methods
 
