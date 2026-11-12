@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -363,6 +364,149 @@ func TestLeads(t *testing.T) {
 			}
 			if got := leads(r, parseCacheControl([]string{tt.reqCC}), tt.stored); got != tt.want {
 				t.Errorf("leads() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// A URL whose response may never be stored is not waited for afterwards: its requests no longer wait for the header of another one.
+func TestUnstoredURLIsNotWaitedFor(t *testing.T) {
+	private := http.Header{"Cache-Control": {"private"}}
+	first := newHeldBackend(private)
+	first.open()
+	c, _ := newTestCache(t, first, collapsing)
+	doRequest(c, http.MethodGet, testURL, nil)
+	if !c.unstoredLately(cacheKey(testURL)) {
+		t.Fatal("the URL must be remembered as never stored")
+	}
+
+	b := newHeldBackend(private)
+	c.next = b
+	leader := startRequest(c, http.MethodGet, testURL, nil)
+	arrive(t, b, 1)
+	others := []*bgRequest{startRequest(c, http.MethodGet, testURL, nil), startRequest(c, http.MethodGet, testURL, nil)}
+	// They reach the backend while the first one has not even sent its header.
+	arrive(t, b, 2)
+	b.open()
+	finish(t, c, append(others, leader)...)
+	for _, r := range others {
+		if got := lastCacheStatus(r.rec); got != "traedis; fwd=uri-miss; fwd-status=200" {
+			t.Errorf("Cache-Status = %q", got)
+		}
+	}
+}
+
+// A response that may be stored lets the requests for its URL wait again at once.
+func TestStorableResponseForgetsUnstored(t *testing.T) {
+	b := newHeldBackend(publicMaxAge)
+	b.open()
+	c, st := newTestCache(t, b, collapsing)
+	c.sawResponse(cacheKey(testURL), false, true)
+	doRequest(c, http.MethodGet, testURL, nil)
+	if c.unstoredLately(cacheKey(testURL)) {
+		t.Error("the URL must be forgotten once a response is stored")
+	}
+	if _, stored := st.lookup(cacheKey(testURL), ""); !stored {
+		t.Error("the response must be stored")
+	}
+}
+
+// What may not last, or depends on the request, is not remembered: an error (an outage would turn collapsing off when it is needed the
+// most), a request with Authorization. Nor anything without collapseTimeout.
+func TestUnstoredOnlyRemembersWhatTheResponseSays(t *testing.T) {
+	failing := &backend{status: http.StatusServiceUnavailable, header: http.Header{"Cache-Control": {"no-store"}}}
+	c, _ := newTestCache(t, failing, collapsing)
+	doRequest(c, http.MethodGet, testURL, nil)
+	if c.unstoredLately(cacheKey(testURL)) {
+		t.Error("an error must not be remembered")
+	}
+
+	// (Handlers in variables, not as arguments: Yaegi v0.16.1 fails to make a handler of them.)
+	fresh := &backend{header: http.Header{"Cache-Control": {"max-age=60"}}}
+	c, _ = newTestCache(t, fresh, collapsing)
+	doRequest(c, http.MethodGet, testURL, http.Header{"Authorization": {"Bearer a"}})
+	if c.unstoredLately(cacheKey(testURL)) {
+		t.Error("a response not stored for its request's Authorization must not be remembered")
+	}
+
+	private := &backend{header: http.Header{"Cache-Control": {"private"}}}
+	c, _ = newTestCache(t, private, nil)
+	doRequest(c, http.MethodGet, testURL, nil)
+	if len(c.unstored) != 0 {
+		t.Error("nothing must be remembered without collapseTimeout")
+	}
+}
+
+// At most maxUnstored URLs are remembered: when full, the expired ones go, and a new one is not remembered if none had.
+func TestUnstoredIsBounded(t *testing.T) {
+	b := cacheableBackend()
+	c, _ := newTestCache(t, b, collapsing)
+	later := time.Now().Add(time.Hour)
+	for i := 0; i < maxUnstored; i++ {
+		c.unstored["k"+strconv.Itoa(i)] = later
+	}
+	c.sawResponse("new", false, true)
+	if c.unstoredLately("new") || len(c.unstored) != maxUnstored {
+		t.Errorf("full: new remembered = %v, %d URLs", c.unstoredLately("new"), len(c.unstored))
+	}
+
+	earlier := time.Now().Add(-time.Second)
+	for k := range c.unstored {
+		c.unstored[k] = earlier
+	}
+	c.sawResponse("new", false, true)
+	if !c.unstoredLately("new") || len(c.unstored) != 1 {
+		t.Errorf("expired: new remembered = %v, %d URLs", c.unstoredLately("new"), len(c.unstored))
+	}
+	c.unstored["new"] = earlier
+	if c.unstoredLately("new") || len(c.unstored) != 0 {
+		t.Error("an expired URL must be forgotten")
+	}
+}
+
+func TestNeverStored(t *testing.T) {
+	cfg, err := parseConfig(testConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	withDefault := cfg
+	withDefault.defaultTTL = 5 * time.Minute
+	tests := []struct {
+		name   string
+		header http.Header
+		status int
+		cfg    settings
+		want   bool
+	}{
+		{name: "fresh", header: http.Header{"Cache-Control": {"max-age=60"}}, want: false},
+		{name: "private", header: http.Header{"Cache-Control": {"private, max-age=60"}}, want: true},
+		{name: "no-store", header: http.Header{"Cache-Control": {"no-store"}}, want: true},
+		{name: "no-cache", header: http.Header{"Cache-Control": {"no-cache"}}, want: true},
+		{name: "Set-Cookie", header: http.Header{"Cache-Control": {"public, max-age=60"}, "Set-Cookie": {"a=1"}}, want: true},
+		{
+			name:   "Set-Cookie kept out",
+			header: http.Header{"Cache-Control": {`max-age=60, private="Set-Cookie"`}, "Set-Cookie": {"a=1"}},
+			want:   false,
+		},
+		{name: "Vary: *", header: http.Header{"Cache-Control": {"max-age=60"}, "Vary": {"*"}}, want: true},
+		{name: "max-age=0", header: http.Header{"Cache-Control": {"max-age=0"}}, want: true},
+		{name: "no freshness, defaultTtl 0", header: http.Header{}, want: true},
+		{name: "no freshness, defaultTtl", header: http.Header{}, cfg: withDefault, want: false},
+		{name: "error outside statusCodes", header: http.Header{"Cache-Control": {"no-store"}}, status: 503, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := tt.cfg
+			if s.statusCodes == nil {
+				s = cfg
+			}
+			status := tt.status
+			if status == 0 {
+				status = http.StatusOK
+			}
+			cc := parseCacheControl(tt.header.Values("Cache-Control"))
+			if got := neverStored(tt.header, cc, status, time.Now(), s); got != tt.want {
+				t.Errorf("neverStored() = %v, want %v", got, tt.want)
 			}
 		})
 	}
